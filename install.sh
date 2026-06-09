@@ -11,10 +11,25 @@ RULES_FILE="${REPO_DIR}/routing-rules.md"
 START_MARKER='<!-- model-harness:start -->'
 END_MARKER='<!-- model-harness:end -->'
 
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+has_any_read_bit() {
+  local mode perms owner group other
+  mode="$(file_mode "$1")" || return 1
+  perms="${mode: -3}"
+  owner="${perms:0:1}"
+  group="${perms:1:1}"
+  other="${perms:2:1}"
+  [ $((owner & 4)) -ne 0 ] || [ $((group & 4)) -ne 0 ] || [ $((other & 4)) -ne 0 ]
+}
+
 # Sanity checks. Also catches invocation via a symlink, where BASH_SOURCE
 # resolves to the link's directory instead of the repo.
 [ -d "${REPO_DIR}/agents" ] || { echo "error: ${REPO_DIR}/agents not found — run install.sh from inside the repo (not via a symlink)" >&2; exit 1; }
-[ -r "${RULES_FILE}" ]      || { echo "error: cannot read ${RULES_FILE}" >&2; exit 1; }
+[ -f "${RULES_FILE}" ] && [ -r "${RULES_FILE}" ] && has_any_read_bit "${RULES_FILE}" \
+  || { echo "error: cannot read ${RULES_FILE}" >&2; exit 1; }
 
 # 1. Install agents (repo is source of truth — overwrite).
 mkdir -p "${AGENTS_DIR}"

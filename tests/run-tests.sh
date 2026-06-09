@@ -7,6 +7,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SANDBOX=$(mktemp -d)
 trap 'rm -rf "$SANDBOX"' EXIT
 run() { HOME="$1" bash "$REPO/install.sh" >/dev/null 2>&1; }
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
 P=0; F=0
 pass() { echo "PASS: $1"; P=$((P+1)); }
 fail() { echo "FAIL: $1"; F=$((F+1)); }
@@ -72,7 +75,7 @@ run "$H"; run "$H"
 
 # T11 permissions preserved through replace
 H="$SANDBOX/t11"; mkdir -p "$H"; run "$H"; chmod 644 "$H/.claude/CLAUDE.md"; run "$H"
-perms=$(stat -f '%Lp' "$H/.claude/CLAUDE.md" 2>/dev/null || stat -c '%a' "$H/.claude/CLAUDE.md")
+perms=$(file_mode "$H/.claude/CLAUDE.md")
 [ "$perms" = "644" ] && pass "T11 perms preserved (644)" || fail "T11 perms changed: $perms"
 
 # T12 marker mentioned in prose (substring) does NOT trigger replace
