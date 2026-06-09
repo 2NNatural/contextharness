@@ -15,6 +15,8 @@ This session is a long-lived orchestrator thread. The main thread holds decision
 
 Escalation ladder: `scout` → `architect` → `oracle`. Never start at `oracle`; never have the main thread ingest bulk material that `oracle` could hold instead.
 
+If the *implementation itself* is genuinely subtle (not just the design — e.g. delicate concurrency code, intricate refactors where an `architect` plan can't capture every judgment call), spawn `executor` with a per-invocation model override to `opus` instead of letting `architect` write code. Architect and oracle stay read-only; all writes flow through `executor`.
+
 ## Context hygiene (main thread)
 
 - Do NOT Read a file longer than ~100 lines in the main thread when a `scout` summary would suffice. Prefer asking `scout` a pointed question over reading at all.
