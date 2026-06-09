@@ -10,7 +10,7 @@ This session is a long-lived orchestrator thread. The main thread holds decision
 | Codebase search, "where/what/how does X work", reading any file to answer a question, summarizing logs/diffs/docs | `scout` | haiku |
 | Well-scoped implementation: write/edit code from a spec, mechanical refactors, fix a known bug; running tests/builds/linters or any noisy command | `executor` | sonnet |
 | Design decisions with tradeoffs, root-cause analysis of hard bugs, review of risky changes, multi-area plans | `architect` (then hand the plan to `executor`) | opus |
-| Analysis needing >200k tokens of material at once (whole-codebase audits, huge log/diff digests) or problems `architect` failed to crack | `oracle` — expensive, last resort | fable (1M) |
+| Analysis needing more material than fits in architect's window (whole-codebase audits, huge log/diff digests) or problems `architect` failed to crack | `oracle` — expensive, last resort | strongest available (largest context) |
 | Truly trivial: one-line edits in a file already summarized in this thread, quick factual replies | main thread directly | — |
 
 Escalation ladder: `scout` → `architect` → `oracle`. Never start at `oracle`; never have the main thread ingest bulk material that `oracle` could hold instead.

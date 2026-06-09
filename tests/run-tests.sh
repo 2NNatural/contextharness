@@ -101,6 +101,46 @@ if HOME="$H" bash "$W3/install.sh" >/dev/null 2>"$SANDBOX/t14.err"; then fail "T
 fi
 chmod 644 "$W3/routing-rules.md"
 
+# T15: --top-model opus rewrites installed oracle.md; re-run with --top-model fable restores it
+H="$SANDBOX/t15"; mkdir -p "$H"
+HOME="$H" bash "$REPO/install.sh" --top-model opus >/dev/null 2>&1
+installed_oracle="$H/.claude/agents/oracle.md"
+if grep -qx 'model: opus' "$installed_oracle" \
+   && ! grep -q 'claude-fable-5' "$installed_oracle" \
+   && grep -qx 'model: claude-fable-5\[1m\]' "$REPO/agents/oracle.md"; then
+  pass "T15a opus: installed oracle has model: opus, repo copy unchanged"
+else
+  fail "T15a opus: installed oracle model wrong or repo copy modified"
+fi
+# Now switch back to fable in the same HOME
+HOME="$H" bash "$REPO/install.sh" --top-model fable >/dev/null 2>&1
+if grep -qx 'model: claude-fable-5\[1m\]' "$installed_oracle"; then
+  pass "T15b fable: re-run restores installed oracle to model: claude-fable-5[1m]"
+else
+  fail "T15b fable: installed oracle not restored"
+fi
+
+# T16: no flag, stdin not a TTY -> defaults to fable silently
+H="$SANDBOX/t16"; mkdir -p "$H"
+HOME="$H" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
+if grep -qx 'model: claude-fable-5\[1m\]' "$H/.claude/agents/oracle.md"; then
+  pass "T16 non-TTY default: installed oracle retains model: claude-fable-5[1m]"
+else
+  fail "T16 non-TTY default: installed oracle wrong"
+fi
+
+# T17: --top-model with invalid value -> exits non-zero, prints error, installs nothing
+H="$SANDBOX/t17"; mkdir -p "$H"
+if HOME="$H" bash "$REPO/install.sh" --top-model gpt5 >/dev/null 2>"$SANDBOX/t17.err"; then
+  fail "T17 should exit non-zero for invalid --top-model"
+else
+  if grep -qiE 'fable|opus' "$SANDBOX/t17.err"; then
+    pass "T17 invalid --top-model: exits non-zero, error mentions valid values"
+  else
+    fail "T17 invalid --top-model: exited non-zero but error doesn't mention valid values: $(cat "$SANDBOX/t17.err")"
+  fi
+fi
+
 echo ""
 echo "=== RESULTS: $P passed, $F failed ==="
 [ "$F" -eq 0 ]

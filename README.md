@@ -5,18 +5,18 @@ Work in **one long-lived Claude Code thread**, never switch models manually, and
 ```
                        you (one thread, never recreated)
                                     │
-                     orchestrator — fable [1M context]
+                  orchestrator — strongest model you have (fable 1M or opus)
                   holds decisions + summaries, not file dumps
                                     │
         ┌──────────────┬────────────┴─┬──────────────────┐
         ▼              ▼              ▼                  ▼
-   scout (haiku)  executor (sonnet)  architect (opus)  oracle (fable 1M)
+   scout (haiku)  executor (sonnet)  architect (opus)  oracle (top model)
    search, read,  write/edit code,  design tradeoffs, >200k-token analysis,
    summarize      run tests/builds  root-cause,       last-resort hard
    read-only      returns report    review → plan     problems — read-only
 ```
 
-Note: fable appears twice by design — the **orchestrator** (your thread) does the highest-level work permanently and can't be switched per-task, while the **oracle** subagent gives you fable's 1M context for huge isolated jobs without polluting the orchestrator's lean context. Escalation ladder: scout → architect → oracle.
+Note: both the **orchestrator** (your thread) and the **oracle** subagent run on your strongest available model tier. The installer asks which tier you have — fable (1M context) or opus — or you can pass `--top-model fable`/`--top-model opus`. The oracle gives that top model a fresh isolated context for huge jobs without polluting the orchestrator's lean context. Escalation ladder: scout → architect → oracle.
 
 Why this saves tokens:
 
@@ -37,19 +37,25 @@ The installer:
 1. Copies `agents/*.md` → `~/.claude/agents/` (user-level: applies to every project).
 2. Inserts the routing-rules block from `routing-rules.md` into `~/.claude/CLAUDE.md` between `<!-- model-harness:start/end -->` markers — anything else in your CLAUDE.md is preserved.
 
-Then set the orchestrator model once: `/model claude-fable-5[1m]`, or make it the default in `~/.claude/settings.json`:
+The installer will ask which model tier you have access to, or you can pass a flag:
 
-```json
-{ "model": "claude-fable-5[1m]" }
+```sh
+./install.sh --top-model fable   # default — fable 1M context (oracle uses claude-fable-5[1m])
+./install.sh --top-model opus    # if fable is unavailable — oracle uses opus instead
 ```
+
+Then set the orchestrator model once to match your chosen tier:
+
+- **fable:** `/model claude-fable-5[1m]` or in `~/.claude/settings.json`: `{ "model": "claude-fable-5[1m]" }`
+- **opus:** `/model opus` or in `~/.claude/settings.json`: `{ "model": "opus" }`
 
 ## Update
 
 ```sh
-git pull && ./install.sh
+git pull && ./install.sh --top-model fable   # or --top-model opus — pass the same tier you used at install
 ```
 
-Idempotent — the marked block is replaced in place, agents are overwritten.
+Idempotent — the marked block is replaced in place, agents are overwritten (re-applying your chosen tier to oracle).
 
 ## Tune it
 
@@ -66,10 +72,10 @@ Re-run `./install.sh` after any change.
 | `agents/scout.md` | haiku — read-only search/read/summarize; returns conclusions only |
 | `agents/executor.md` | sonnet — scoped implementation + runs tests/builds; returns short report |
 | `agents/architect.md` | opus — read-only design/debugging/review; returns plan for executor |
-| `agents/oracle.md` | fable (1M) — read-only huge-context analysis & last-resort reasoning |
+| `agents/oracle.md` | top model (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
 | `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
 | `install.sh` | idempotent user-level installer |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (14 cases — idempotency, content preservation, symlinks, corruption refusal) |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (17 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag) |
 
 ## Test
 
