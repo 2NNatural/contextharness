@@ -36,8 +36,9 @@ The installer:
 
 1. Copies `agents/*.md` → `~/.claude/agents/` (user-level: applies to every project).
 2. Inserts the routing-rules block from `routing-rules.md` into `~/.claude/CLAUDE.md` between `<!-- model-harness:start/end -->` markers — anything else in your CLAUDE.md is preserved.
+3. Copies `skills/*/` → `~/.claude/skills/` (on-demand skills like routing-refresh).
 
-The installer will ask which model tier you have access to, or you can pass a flag:
+Without a `--top-model` flag the installer always auto-probes your strongest available model tier first; it only prompts (TTY) or defaults silently to fable (non-TTY) when the probe is inconclusive. You can also pass a flag explicitly:
 
 ```sh
 ./install.sh --top-model fable   # default — fable 1M context (oracle uses claude-fable-5[1m])
@@ -75,7 +76,8 @@ Re-run `./install.sh` after any change.
 | `agents/oracle.md` | top model (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
 | `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
 | `install.sh` | idempotent user-level installer |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (17 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag) |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (20 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install) |
+| `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
 
 ## Test
 

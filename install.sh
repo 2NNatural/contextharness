@@ -6,6 +6,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${HOME}/.claude"
 AGENTS_DIR="${CLAUDE_DIR}/agents"
+SKILLS_SRC="${REPO_DIR}/skills"
+SKILLS_DIR="${CLAUDE_DIR}/skills"
 CLAUDE_MD="${CLAUDE_DIR}/CLAUDE.md"
 RULES_FILE="${REPO_DIR}/routing-rules.md"
 START_MARKER='<!-- model-harness:start -->'
@@ -23,6 +25,37 @@ has_any_read_bit() {
   group="${perms:1:1}"
   other="${perms:2:1}"
   [ $((owner & 4)) -ne 0 ] || [ $((group & 4)) -ne 0 ] || [ $((other & 4)) -ne 0 ]
+}
+
+# Best-effort probe for the strongest available model tier.
+# Echoes "fable" or "opus", or "" if inconclusive. NEVER fails the install.
+# Drives the `claude` CLI in print mode to reuse Claude Code's own resolved
+# auth (OAuth/keychain/apiKeyHelper) — no ANTHROPIC_API_KEY required.
+probe_top_model() {
+  if command -v claude >/dev/null 2>&1; then
+    local runner=""
+    if command -v timeout >/dev/null 2>&1; then runner="timeout 25"
+    elif command -v gtimeout >/dev/null 2>&1; then runner="gtimeout 25"; fi
+    if ${runner} claude -p --model claude-fable-5 --max-turns 1 'hi' >/dev/null 2>&1; then
+      printf 'fable'; return 0
+    fi
+    printf 'opus'; return 0
+  fi
+  if [ -n "${ANTHROPIC_API_KEY:-}" ] && command -v curl >/dev/null 2>&1; then
+    local code
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+      -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+      -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
+      -d '{"model":"claude-fable-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
+      https://api.anthropic.com/v1/messages 2>/dev/null)" || { printf ''; return 0; }
+    case "${code}" in
+      200) printf 'fable'; return 0 ;;
+      4*)  printf 'opus';  return 0 ;;
+      *)   printf '';      return 0 ;;
+    esac
+  fi
+  printf ''
 }
 
 # --- Parse --top-model flag (supports --top-model VALUE and --top-model=VALUE) ---
@@ -59,23 +92,32 @@ if [ -n "${TOP_MODEL}" ]; then
   esac
 fi
 
-# If no flag was given, prompt if stdin is a TTY; otherwise default silently to fable
+# If no flag was given, ALWAYS auto-probe the tier first; only prompt (TTY) or
+# default to fable (non-TTY) when the probe is inconclusive.
 if [ -z "${TOP_MODEL}" ]; then
-  if [ -t 0 ]; then
-    while true; do
-      printf "Strongest model on your plan? [fable/opus] (default: fable): "
-      read -r answer
-      case "${answer}" in
-        ""|fable) TOP_MODEL="fable"; break ;;
-        opus)     TOP_MODEL="opus";  break ;;
-        *)
-          echo "Invalid choice '${answer}'. Please enter 'fable' or 'opus'." >&2
-          ;;
-      esac
-    done
-  else
-    TOP_MODEL="fable"
-  fi
+  probed="$(probe_top_model || true)"
+  case "${probed}" in
+    fable|opus)
+      TOP_MODEL="${probed}"
+      echo "auto-detected top model tier: ${TOP_MODEL}" >&2
+      ;;
+    *)
+      if [ -t 0 ]; then
+        while true; do
+          printf "Strongest model on your plan? [fable/opus] (default: fable): "
+          read -r answer
+          case "${answer}" in
+            ""|fable) TOP_MODEL="fable"; break ;;
+            opus)     TOP_MODEL="opus";  break ;;
+            *) echo "Invalid choice '${answer}'. Please enter 'fable' or 'opus'." >&2 ;;
+          esac
+        done
+      else
+        TOP_MODEL="fable"
+        echo "tier probe inconclusive; defaulting to fable (override with --top-model)" >&2
+      fi
+      ;;
+  esac
 fi
 
 # Sanity checks. Also catches invocation via a symlink, where BASH_SOURCE
@@ -90,6 +132,18 @@ for f in "${REPO_DIR}"/agents/*.md; do
   cp "$f" "${AGENTS_DIR}/"
   echo "installed agent: ${AGENTS_DIR}/$(basename "$f")"
 done
+
+# 1b. Install skills (repo is source of truth — overwrite the tree).
+if [ -d "${SKILLS_SRC}" ]; then
+  mkdir -p "${SKILLS_DIR}"
+  for d in "${SKILLS_SRC}"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    mkdir -p "${SKILLS_DIR}/${name}"
+    cp "$d"*.md "${SKILLS_DIR}/${name}/"
+    echo "installed skill: ${SKILLS_DIR}/${name}"
+  done
+fi
 
 # 1a. If top model is opus, rewrite the INSTALLED oracle.md only (repo copy untouched).
 INSTALLED_ORACLE="${AGENTS_DIR}/oracle.md"

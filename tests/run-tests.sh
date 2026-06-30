@@ -121,8 +121,9 @@ else
 fi
 
 # T16: no flag, stdin not a TTY -> defaults to fable silently
+# Strip ANTHROPIC_API_KEY and claude CLI from PATH so probe is deterministically inconclusive.
 H="$SANDBOX/t16"; mkdir -p "$H"
-HOME="$H" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
+env -u ANTHROPIC_API_KEY HOME="$H" PATH="/usr/bin:/bin" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
 if grep -qx 'model: claude-fable-5\[1m\]' "$H/.claude/agents/oracle.md"; then
   pass "T16 non-TTY default: installed oracle retains model: claude-fable-5[1m]"
 else
@@ -139,6 +140,30 @@ else
   else
     fail "T17 invalid --top-model: exited non-zero but error doesn't mention valid values: $(cat "$SANDBOX/t17.err")"
   fi
+fi
+
+# T18: skill file installs into the sandbox HOME
+H="$SANDBOX/t18"; mkdir -p "$H"; run "$H"
+if [ -f "$H/.claude/skills/routing-refresh/SKILL.md" ] \
+   && grep -q 'name: routing-refresh' "$H/.claude/skills/routing-refresh/SKILL.md"; then
+  pass "T18 routing-refresh skill installed to HOME"
+else
+  fail "T18 skill not installed"
+fi
+
+# T19: skills copy is idempotent (second run byte-identical)
+cp "$H/.claude/skills/routing-refresh/SKILL.md" "$SANDBOX/t19.before"; run "$H"
+cmp -s "$SANDBOX/t19.before" "$H/.claude/skills/routing-refresh/SKILL.md" \
+  && pass "T19 skill install idempotent" || fail "T19 skill changed on re-run"
+
+# T20: tier probe falls back to fable when no API access (non-TTY, no key, no claude CLI)
+H="$SANDBOX/t20"; mkdir -p "$H"
+env -u ANTHROPIC_API_KEY HOME="$H" PATH="/usr/bin:/bin" \
+  bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
+if grep -qx 'model: claude-fable-5\[1m\]' "$H/.claude/agents/oracle.md"; then
+  pass "T20 no-API probe falls back to fable"
+else
+  fail "T20 probe fallback wrong: $(grep '^model:' "$H/.claude/agents/oracle.md")"
 fi
 
 echo ""
