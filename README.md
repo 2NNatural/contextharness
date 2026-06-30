@@ -1,6 +1,14 @@
 # Model-Routing Harness for Claude Code
 
+**Status:** active · `main` · last session 2026-06-30 (routing-refresh skill + auto tier-detection + effort policy shipped)
+
 Work in **one long-lived Claude Code thread**, never switch models manually, and pay the cheapest rate for each kind of work. The main thread acts as an orchestrator; token-heavy work (reading code, running tests, deep analysis) is delegated to subagents pinned to cheaper models, each with its own disposable context window.
+
+## Documentation
+
+- [CONTEXT.md](CONTEXT.md) — project brain / session memory: behavioral rules, goals, stack, decisions (upload this to start a session)
+- [PROGRESS.md](PROGRESS.md) — changelog, feature status, known issues
+- [ROADMAP.md](ROADMAP.md) — the single prioritized what's-next
 
 ```
                        you (one thread, never recreated)
@@ -16,7 +24,7 @@ Work in **one long-lived Claude Code thread**, never switch models manually, and
    read-only      returns report    review → plan     problems — read-only
 ```
 
-Note: both the **orchestrator** (your thread) and the **oracle** subagent run on your strongest available model tier. The installer asks which tier you have — fable (1M context) or opus — or you can pass `--top-model fable`/`--top-model opus`. The oracle gives that top model a fresh isolated context for huge jobs without polluting the orchestrator's lean context. Escalation ladder: scout → architect → oracle.
+Note: both the **orchestrator** (your thread) and the **oracle** subagent run on your strongest available model tier. The installer **auto-detects** that tier — fable (1M context) or opus — by probing the API on every run; pass `--top-model fable`/`--top-model opus` to override. The oracle gives that top model a fresh isolated context for huge jobs without polluting the orchestrator's lean context. Escalation ladder: scout → architect → oracle.
 
 Why this saves tokens:
 
