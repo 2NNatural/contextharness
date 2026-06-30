@@ -62,6 +62,7 @@ Idempotent — the marked block is replaced in place, agents are overwritten (re
 
 - **Delegation too timid / too eager?** Edit the `description:` line in the relevant `agents/*.md` — that's what the orchestrator matches against when deciding to delegate. Stronger wording ("Use PROACTIVELY for ALL …") = more delegation.
 - **Change a model:** edit the `model:` line (`haiku`, `sonnet`, `opus`, `fable`, or a full model ID like `claude-haiku-4-5`).
+- **Change an effort level:** edit the `effort:` line (`low`, `medium`, `high`, `xhigh`, `max`) in the relevant `agents/*.md` file.
 - **Change routing policy:** edit `routing-rules.md`.
 
 Re-run `./install.sh` after any change.
@@ -70,10 +71,10 @@ Re-run `./install.sh` after any change.
 
 | File | Purpose |
 |---|---|
-| `agents/scout.md` | haiku — read-only search/read/summarize; returns conclusions only |
-| `agents/executor.md` | sonnet — scoped implementation + runs tests/builds; returns short report |
-| `agents/architect.md` | opus — read-only design/debugging/review; returns plan for executor |
-| `agents/oracle.md` | top model (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
+| `agents/scout.md` | haiku, low effort — read-only search/read/summarize; returns conclusions only |
+| `agents/executor.md` | sonnet, medium effort — scoped implementation + runs tests/builds; returns short report |
+| `agents/architect.md` | opus, high effort — read-only design/debugging/review; returns plan for executor |
+| `agents/oracle.md` | top model, xhigh effort (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
 | `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
 | `install.sh` | idempotent user-level installer |
 | `tests/run-tests.sh` | sandboxed regression suite for the installer (20 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install) |

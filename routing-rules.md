@@ -17,6 +17,8 @@ Escalation ladder: `scout` → `architect` → `oracle`. Never start at `oracle`
 
 If the *implementation itself* is genuinely subtle (not just the design — e.g. delicate concurrency code, intricate refactors where an `architect` plan can't capture every judgment call), spawn `executor` with a per-invocation model override to `opus` instead of letting `architect` write code. Architect and oracle stay read-only; all writes flow through `executor`.
 
+Set per-invocation **effort** the same way you set model — by task difficulty, not just role. Each agent has a default effort (scout: low, executor: medium, architect: high, oracle: xhigh); the main thread, as the strongest model and the one holding the task context, overrides it when a specific instance runs hot or cold. Raise effort for an unusually hard task within a role (a `scout` untangling a sprawling module, an `executor` implementing a delicate algorithm); drop it for a trivial one (an `executor` making a one-line config edit). Floors: never run `architect` or `oracle` below `high` — they are only invoked for hard problems to begin with. (Effort is passed at spawn time via the `Agent`/`Workflow` call; the `effort:` line in each agent file is the documented default, not an automatic setting.)
+
 ## Context hygiene (main thread)
 
 - Do NOT Read a file longer than ~100 lines in the main thread when a `scout` summary would suffice. Prefer asking `scout` a pointed question over reading at all.
