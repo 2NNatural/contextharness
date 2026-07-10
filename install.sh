@@ -126,6 +126,17 @@ fi
 [ -f "${RULES_FILE}" ] && [ -r "${RULES_FILE}" ] && has_any_read_bit "${RULES_FILE}" \
   || { echo "error: cannot read ${RULES_FILE}" >&2; exit 1; }
 
+# Normalize the rules file's line endings before using it anywhere below.
+# On Windows, git may check routing-rules.md out with CRLF while a
+# previously-installed CLAUDE.md block was written with LF (or vice versa),
+# which makes re-runs of the block-replace path non-idempotent byte-for-byte
+# even though the content is identical modulo \r. Read through a stripped
+# copy so every code path (fresh append and block replace) emits LF-only.
+NORMALIZED_RULES_FILE="$(mktemp)"
+trap 'rm -f "${NORMALIZED_RULES_FILE}"' EXIT
+tr -d '\r' < "${RULES_FILE}" > "${NORMALIZED_RULES_FILE}"
+RULES_FILE="${NORMALIZED_RULES_FILE}"
+
 # 1. Install agents (repo is source of truth — overwrite).
 mkdir -p "${AGENTS_DIR}"
 for f in "${REPO_DIR}"/agents/*.md; do

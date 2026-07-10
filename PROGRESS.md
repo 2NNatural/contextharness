@@ -88,3 +88,17 @@ Revised the Codex integration from manual-only (decision 8) to a **toggle-gated*
 ### Open item owed
 - **Verify on first ON-mode use:** whether the `codex:codex-rescue` subagent accepts an arbitrary read-only review/audit prompt and a per-call `--model` tier when spawned via the Agent tool. Shipped assuming yes (option A) with a degrade path: on failure the orchestrator finishes via the Claude ladder and tells the user in one line.
 - User manual step still owed: `codex login`, `/plugin marketplace add openai/codex-plugin-cc`, `/plugin install codex@openai-codex`, then `touch ~/.claude/codex-routing.on` to enable auto-routing.
+
+---
+
+## Session 2026-07-09 (Windows/Git Bash portability)
+
+Fixed one real portability bug and added environment skip-guards for two tests that cannot pass on Windows, so `tests/run-tests.sh` is green on Windows/Git Bash without weakening the suite elsewhere.
+
+### Changed
+- `.gitattributes` — new: `* text=auto eol=lf`, so git checks out repo text files (including `routing-rules.md`) with LF regardless of host OS; renormalized the tree (`git add --renormalize .`).
+- `install.sh` — the rules-file read path now goes through a `tr -d '\r'`-normalized temp copy (both the fresh-append and block-replace code paths use it), so a CRLF-checked-out `routing-rules.md` can never make re-runs byte-non-identical. Root cause of T2's Windows failure: first install wrote a CRLF block, the block-replace path on re-run wrote LF, so bytes differed even though content matched modulo `\r`.
+- `tests/run-tests.sh` — added `skip()` alongside `pass`/`fail`, plus `symlinks_supported()` and `chmod_000_enforced()` capability probes (create-and-check rather than OS sniffing). T10 (symlinked CLAUDE.md) and T14 (chmod 000 unreadable rules file) now SKIP with a clear reason when the platform can't enforce the precondition — Git Bash's `ln -s` copies instead of symlinking without elevated privileges, and NTFS doesn't enforce chmod 000. RESULTS line now reports passed/failed/skipped.
+
+### Verified
+`bash tests/run-tests.sh` on Windows/Git Bash: `=== RESULTS: 21 passed, 0 failed, 2 skipped ===`, exit 0 (T2 passes, T10/T14 SKIP, all others still PASS).

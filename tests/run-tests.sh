@@ -10,9 +10,41 @@ run() { HOME="$1" bash "$REPO/install.sh" >/dev/null 2>&1; }
 file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
 }
-P=0; F=0
+P=0; F=0; S=0
 pass() { echo "PASS: $1"; P=$((P+1)); }
 fail() { echo "FAIL: $1"; F=$((F+1)); }
+skip() { echo "SKIP: $1"; S=$((S+1)); }
+
+# Detect symlink support directly rather than sniffing uname: Git Bash's
+# `ln -s` silently copies instead of symlinking without elevated privileges
+# or Developer Mode on Windows, which would otherwise make T10 a false fail.
+symlinks_supported() {
+  local probe_dir target link ok
+  probe_dir="$(mktemp -d)"
+  target="${probe_dir}/target"
+  link="${probe_dir}/link"
+  printf 'x' > "${target}"
+  ln -s "${target}" "${link}" 2>/dev/null
+  ok=1
+  [ -L "${link}" ] && ok=0
+  rm -rf "${probe_dir}"
+  return "${ok}"
+}
+
+# Detect whether chmod 000 actually blocks reads for the current user.
+# On NTFS (including via Git Bash/MSYS), chmod 000 does not enforce
+# unreadability, which would otherwise make T14 a false fail.
+chmod_000_enforced() {
+  local probe_file ok
+  probe_file="$(mktemp)"
+  printf 'x' > "${probe_file}"
+  chmod 000 "${probe_file}"
+  ok=1
+  cat "${probe_file}" >/dev/null 2>&1 || ok=0
+  chmod 644 "${probe_file}"
+  rm -f "${probe_file}"
+  return "${ok}"
+}
 
 # T1 fresh install
 H="$SANDBOX/t1"; mkdir -p "$H"; run "$H"
@@ -65,13 +97,17 @@ printf '<!-- model-harness:end -->\nmiddle\n<!-- model-harness:start -->\ntail\n
 if run "$H"; then fail "T9 should refuse out-of-order markers"; else pass "T9 out-of-order markers: refused"; fi
 
 # T10 symlinked CLAUDE.md preserved (dotfile-repo setups)
-H="$SANDBOX/t10"; mkdir -p "$H/.claude" "$SANDBOX/dotfiles"
-printf 'dotfile content\n' > "$SANDBOX/dotfiles/CLAUDE.md"
-ln -s "$SANDBOX/dotfiles/CLAUDE.md" "$H/.claude/CLAUDE.md"
-run "$H"; run "$H"
-[ -L "$H/.claude/CLAUDE.md" ] && grep -q 'model-harness:start' "$SANDBOX/dotfiles/CLAUDE.md" \
-  && grep -q 'dotfile content' "$SANDBOX/dotfiles/CLAUDE.md" \
-  && pass "T10 symlink preserved, target updated" || fail "T10 symlink severed"
+if symlinks_supported; then
+  H="$SANDBOX/t10"; mkdir -p "$H/.claude" "$SANDBOX/dotfiles"
+  printf 'dotfile content\n' > "$SANDBOX/dotfiles/CLAUDE.md"
+  ln -s "$SANDBOX/dotfiles/CLAUDE.md" "$H/.claude/CLAUDE.md"
+  run "$H"; run "$H"
+  [ -L "$H/.claude/CLAUDE.md" ] && grep -q 'model-harness:start' "$SANDBOX/dotfiles/CLAUDE.md" \
+    && grep -q 'dotfile content' "$SANDBOX/dotfiles/CLAUDE.md" \
+    && pass "T10 symlink preserved, target updated" || fail "T10 symlink severed"
+else
+  skip "T10 (symlinks unsupported on this platform)"
+fi
 
 # T11 permissions preserved through replace
 H="$SANDBOX/t11"; mkdir -p "$H"; run "$H"; chmod 644 "$H/.claude/CLAUDE.md"; run "$H"
@@ -94,12 +130,16 @@ if HOME="$H" bash "$W2/install.sh" >/dev/null 2>"$SANDBOX/t13.err"; then fail "T
 fi
 
 # T14 unreadable rules file -> upfront error, CLAUDE.md untouched
-W3="$SANDBOX/repo3"; cp -R "$REPO" "$W3"; rm -rf "$W3/.git" "$W3/.claude"; chmod 000 "$W3/routing-rules.md"
-H="$SANDBOX/t14"; mkdir -p "$H"
-if HOME="$H" bash "$W3/install.sh" >/dev/null 2>"$SANDBOX/t14.err"; then fail "T14 should error"; else
-  grep -q 'cannot read' "$SANDBOX/t14.err" && pass "T14 unreadable rules: upfront error" || fail "T14 wrong error"
+if chmod_000_enforced; then
+  W3="$SANDBOX/repo3"; cp -R "$REPO" "$W3"; rm -rf "$W3/.git" "$W3/.claude"; chmod 000 "$W3/routing-rules.md"
+  H="$SANDBOX/t14"; mkdir -p "$H"
+  if HOME="$H" bash "$W3/install.sh" >/dev/null 2>"$SANDBOX/t14.err"; then fail "T14 should error"; else
+    grep -q 'cannot read' "$SANDBOX/t14.err" && pass "T14 unreadable rules: upfront error" || fail "T14 wrong error"
+  fi
+  chmod 644 "$W3/routing-rules.md"
+else
+  skip "T14 (chmod 000 unreadable-file enforcement unsupported on this platform)"
 fi
-chmod 644 "$W3/routing-rules.md"
 
 # T15: --top-model opus rewrites installed oracle.md; re-run with --top-model fable restores it
 H="$SANDBOX/t15"; mkdir -p "$H"
@@ -173,5 +213,5 @@ touch "$H/.claude/codex-routing.on"; run "$H"
 [ -e "$H/.claude/codex-routing.on" ] && pass "T21b re-run preserves Codex toggle" || fail "T21b toggle clobbered"
 
 echo ""
-echo "=== RESULTS: $P passed, $F failed ==="
+echo "=== RESULTS: $P passed, $F failed, $S skipped ==="
 [ "$F" -eq 0 ]
