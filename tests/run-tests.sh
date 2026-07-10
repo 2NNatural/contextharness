@@ -166,6 +166,12 @@ else
   fail "T20 probe fallback wrong: $(grep '^model:' "$H/.claude/agents/oracle.md")"
 fi
 
+# T21: install.sh neither creates the Codex toggle nor clobbers an existing one
+H="$SANDBOX/t21"; mkdir -p "$H"; run "$H"
+[ ! -e "$H/.claude/codex-routing.on" ] && pass "T21a fresh install leaves Codex toggle OFF (absent)" || fail "T21a toggle created"
+touch "$H/.claude/codex-routing.on"; run "$H"
+[ -e "$H/.claude/codex-routing.on" ] && pass "T21b re-run preserves Codex toggle" || fail "T21b toggle clobbered"
+
 echo ""
 echo "=== RESULTS: $P passed, $F failed ==="
 [ "$F" -eq 0 ]

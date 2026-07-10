@@ -34,6 +34,25 @@ re-run the installer.
    you cannot confirm the current lineup from live sources (no network, pages
    unreachable, contradictory data you can't resolve), STOP, tell the user
    exactly what was inconclusive, and make NO file changes.
+6. **Codex refresh is toggle-gated.** If (and only if) `~/.claude/codex-routing.on`
+   exists (`test -e`), ALSO research the current OpenAI Codex model lineup —
+   official OpenAI Codex docs only (the Codex models page and changelog) — and
+   propose updates to the GPT tier IDs and effort levels in the "Optional
+   cross-vendor tools (Codex — toggle-gated)" section of `routing-rules.md`
+   and the matching README table, under the SAME diff-then-confirm gate.
+   Present Codex changes clearly separated from Claude changes in the diff.
+   Never invent Codex model IDs (same verbatim-from-fetched-source rule as
+   Claude IDs). If the toggle file is absent, do not research or touch
+   anything Codex. Never edit `.codex/config.toml` or the toggle file itself.
+
+7. **Keep the refresh cheap — delegate the research legwork.** Do not do the
+   bulk page-fetching and extraction in the expensive main-thread context.
+   Spawn a cheap subagent (e.g. `general-purpose` with a `haiku` model
+   override at `low` effort; use `sonnet` only if haiku's extraction proves
+   unreliable) to fetch the official pages and return ONLY a compact table of
+   model IDs, tiers, context windows, prices, and source URLs. The main
+   thread then cross-checks that table, builds the diff, and runs the
+   confirmation gate. Full page dumps must never land in the main thread.
 
 ## Procedure
 
@@ -61,7 +80,18 @@ available model, extract verbatim: the exact **model ID**, its **tier/alias**
 Capture the source URL for each fact. If the `claude-api` skill is available,
 use it to confirm IDs are real and current; prefer it as the source of truth
 for IDs. Do NOT proceed past this step on memory alone — if WebSearch/WebFetch
-returned nothing usable, go to the abort path (rule 5).
+returned nothing usable, go to the abort path (rule 5). Per rule 7, delegate
+the fetching/extraction to a cheap subagent and work from its compact table —
+do not pull full pages into the main thread.
+
+### Step 2b — Research the Codex lineup (ONLY if the toggle is on)
+If `~/.claude/codex-routing.on` exists: via the same cheap-subagent delegation
+(rule 7), fetch the official OpenAI Codex models documentation and extract the
+current GPT tier IDs (e.g. the current equivalents of sol/terra/luna),
+pricing, and any reasoning-effort levels supported. If the toggle is absent,
+skip this step entirely. Codex findings feed a SEPARATE part of the Step 5
+diff: updates to the Codex section of `routing-rules.md` and the README table
+only. All rule-6 restrictions apply.
 
 ### Step 3 — Map findings onto the harness roles
 The harness has five routing slots. Decide the best CURRENT model for each,

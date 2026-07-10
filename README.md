@@ -75,6 +75,49 @@ Idempotent — the marked block is replaced in place, agents are overwritten (re
 
 Re-run `./install.sh` after any change.
 
+## Optional cross-vendor tools (Codex — toggle-gated)
+
+Independent of the routing harness, you can bolt on OpenAI's official [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for cross-model review and a different-vendor escape valve. A single **toggle** controls whether the orchestrator may reach for it automatically.
+
+**Prerequisites:** Node.js 18.18+ and a local `codex` CLI authenticated against your ChatGPT/Codex subscription (`codex login`).
+
+**Install — manual, inside an active Claude Code session (cannot be scripted from `install.sh`):**
+
+```
+/plugin marketplace add openai/codex-plugin-cc
+/plugin install codex@openai-codex
+```
+
+Its config lives in `.codex/config.toml` (user or project level) — a separate namespace that does not touch this harness's agents, aliases, or the `~/.claude/CLAUDE.md` block. Pick a model per call with `--model <id>` — GPT-5.6 in three tiers: `gpt-5.6-sol` (flagship; complex-coding, cybersecurity, and research strength; default for bare `gpt-5.6`), `gpt-5.6-terra` (cheaper/faster), `gpt-5.6-luna` (lightest).
+
+### The toggle
+
+Auto-routing to Codex is **OFF by default** and gated by one file:
+
+```sh
+touch ~/.claude/codex-routing.on   # ON  — orchestrator may auto-route read-only reviews/audits to Codex
+rm    ~/.claude/codex-routing.on   # OFF — Codex is manual-only (default)
+ls    ~/.claude/codex-routing.on   # check state at a glance
+```
+
+The file survives `./install.sh` re-runs, so `git pull && ./install.sh` never flips it. Fresh installs and users without the plugin have no file → OFF, and nothing here assumes you have Codex.
+
+- **OFF (default):** Codex runs only when *you* type a `/codex:*` command by name. The orchestrator never auto-invokes it; it may only remind you the option exists.
+- **ON:** the orchestrator may automatically get a cross-vendor **read-only** second opinion — *alongside*, never instead of, the Claude ladder — choosing the tier per task:
+
+  | Task | Tier | Effort | Notes |
+  |---|---|---|---|
+  | Adversarial review of a risky change (supplements `architect`) | `gpt-5.6-terra` | medium | cheap cross-vendor diversity |
+  | Second opinion on a high-stakes `architect` plan | `gpt-5.6-terra` | medium | high-stakes plans only |
+  | Security / vulnerability audit of a module or area | `gpt-5.6-sol` | high | orchestrator confirms with you first (priciest tier) |
+  | High-level judgment audit — subjective design/mechanism flaws in functionally-correct code (math repos, prediction-market execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits) | `gpt-5.6-sol` | xhigh | orchestrator confirms with you first (priciest tier) |
+
+  Even when ON, Codex never does **writes**: implementation stays with `executor` (Claude leads SWE-bench Pro real-issue resolution), and `/codex:rescue` / `codex:codex-rescue`-as-fixer remain user-initiated by name. Routine search and log-digestion stay on `scout` (haiku is cheaper and native). The binding rules live in `routing-rules.md` (installed into `~/.claude/CLAUDE.md`). Effort is passed per-call where supported; otherwise set matching defaults once in `.codex/config.toml`.
+
+**Manual commands (any time, regardless of toggle):** `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`, `/codex:cancel`.
+
+This deliberately spreads some review/audit load off your Anthropic quota onto your Codex subscription. The `routing-refresh` skill keeps the Codex tier IDs in this table fresh too — but only when the toggle file exists, and always under the same diff-then-confirm gate; your `.codex/config.toml` itself is never touched.
+
 ## Files
 
 | File | Purpose |
@@ -85,7 +128,7 @@ Re-run `./install.sh` after any change.
 | `agents/oracle.md` | top model, xhigh effort (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
 | `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
 | `install.sh` | idempotent user-level installer |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (20 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install) |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (21 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved) |
 | `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
 
 ## Test

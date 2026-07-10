@@ -52,3 +52,39 @@ Context: started from the prompt "sonnet 5 is now out … our harness should be 
 - **The `routing-refresh` skill's own behavior is not unit-tested.** It's an LLM procedure, not code — its guardrails live in prose + the diff-then-confirm human gate. Tests cover the installer plumbing only.
 - **Binary tier probe.** Only fable-vs-opus; doesn't generalize to a third simultaneous top-tier option without code changes.
 - **New model *class* (not version) not auto-handled.** Refresh safe-scope forbids creating new agent slots; a genuinely new tier needs a human (via `architect`) to design a new agent. By design.
+
+---
+
+## Session 2026-07-08
+
+Doc-only session: integrated OpenAI's official Codex plugin (github.com/openai/codex-plugin-cc) as a manual-only, cross-vendor bolt-on for adversarial review and a last-resort escape valve. No code or test changes.
+
+### Changed
+- `routing-rules.md` — added "Optional cross-vendor tools" section with the NEVER-auto-invoke guardrail (inside the model-harness marker block, so it propagates to `~/.claude/CLAUDE.md`).
+- `README.md` — added "Optional cross-vendor tools (Codex)" section: prerequisites, manual install commands, the two sanctioned use cases.
+- `skills/routing-refresh/SKILL.md` — added rule 6 excluding Codex/cross-vendor from the skill's Claude-lineup-only scope.
+- `CONTEXT.md` — logged decision 8 (see CONTEXT.md §5 for full reasoning).
+- `install.sh` — deliberately NOT touched. Plugin install is an interactive Claude Code slash-command action (`/plugin marketplace add`, `/plugin install`) with no verified scriptable shell entrypoint.
+
+### Manual step still owed by the user (not automatable)
+Inside an active Claude Code session: `codex login` (if not already authenticated), then `/plugin marketplace add openai/codex-plugin-cc`, then `/plugin install codex@openai-codex`. Verify via `/agents` (should list `codex:codex-rescue`) and `/codex:status`.
+
+---
+
+## Session 2026-07-09
+
+Revised the Codex integration from manual-only (decision 8) to a **toggle-gated** policy per new requirement; expanded sol to high-level judgment audits (CONTEXT.md §5 decision 9). GPT-5.6 confirmed public this session (`gpt-5.6-sol` $5/$30, `gpt-5.6-terra` $2.50/$15, `gpt-5.6-luna` $1/$6 — verified via OpenAI Codex docs).
+
+### Changed
+- `routing-rules.md` — replaced "Optional cross-vendor tools (manual only …)" with "(Codex — toggle-gated)": `~/.claude/codex-routing.on` state file (OFF default), ON-mode read-only routing table (terra: adversarial review + plan second-opinion; sol with confirm gate: security audits + high-level judgment/efficiency/data audits), forbidden-even-when-ON list, orchestrator-only control flow (architect has no Codex role).
+- `README.md` — rewrote the Codex section: toggle usage (`touch`/`rm`/`ls`), ON-mode routing table incl. judgment audits, GPT-5.6 tier IDs; manual `/codex:*` commands kept; test count 20 → 21.
+- `skills/routing-refresh/SKILL.md` — tightened rule 6: skill must leave the Codex section of `routing-rules.md` byte-for-byte untouched.
+- `tests/run-tests.sh` — added T21 (install.sh never creates or clobbers the toggle file).
+- `CONTEXT.md` — logged decision 9.
+- `install.sh` — deliberately NOT changed; toggle is decoupled and default-OFF.
+
+- **Amendment (same session):** refresh now covers Codex when the toggle is on (skill rule 6 rewritten; new Step 2b), refresh research is delegated to a cheap haiku subagent (new rule 7 — token thrift), and the Codex routing tables gained a per-task Effort column (terra=medium, sol security=high, sol judgment=xhigh) in `routing-rules.md` + `README.md`. CONTEXT.md decision 10.
+
+### Open item owed
+- **Verify on first ON-mode use:** whether the `codex:codex-rescue` subagent accepts an arbitrary read-only review/audit prompt and a per-call `--model` tier when spawned via the Agent tool. Shipped assuming yes (option A) with a degrade path: on failure the orchestrator finishes via the Claude ladder and tells the user in one line.
+- User manual step still owed: `codex login`, `/plugin marketplace add openai/codex-plugin-cc`, `/plugin install codex@openai-codex`, then `touch ~/.claude/codex-routing.on` to enable auto-routing.
