@@ -66,6 +66,17 @@ git pull && ./install.sh --top-model fable   # or --top-model opus — pass the 
 
 Idempotent — the marked block is replaced in place, agents are overwritten (re-applying your chosen tier to oracle).
 
+### Optional: context meter (opt-in hook)
+
+A local `UserPromptSubmit` hook that reads real token usage from the session transcript and injects a one-line `[context: ~N%]` marker **only** when usage crosses 70/80/90% — giving the orchestrator a true compaction signal instead of a guess. Pure local shell: no `claude`/API calls, zero cost below threshold.
+
+```sh
+./install.sh --with-context-hook     # copies hooks/context-meter.sh, registers it in ~/.claude/settings.json (jq merge, backup written)
+./install.sh --remove-context-hook   # unregisters + deletes the script
+```
+
+Requires `jq`. The default context window is **1,000,000** (fable 1M / opus-4.8 / sonnet-5); on a 200k-capped plan set `CLAUDE_CONTEXT_WINDOW=200000`. The merge is idempotent and non-destructive — your existing `settings.json` (model, other hooks) is preserved and backed up before any write.
+
 ## Tune it
 
 - **Delegation too timid / too eager?** Edit the `description:` line in the relevant `agents/*.md` — that's what the orchestrator matches against when deciding to delegate. Stronger wording ("Use PROACTIVELY for ALL …") = more delegation.
@@ -128,7 +139,8 @@ This deliberately spreads some review/audit load off your Anthropic quota onto y
 | `agents/oracle.md` | top model, xhigh effort (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
 | `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
 | `install.sh` | idempotent user-level installer |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (21 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved) |
+| `hooks/context-meter.sh` | UserPromptSubmit hook — injects `[context: ~N%]` at 70/80/90% band crossings from real transcript usage |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (27 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved, context-meter hook install/merge/remove/logic) |
 | `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
 
 ## Test

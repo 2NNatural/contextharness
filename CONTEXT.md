@@ -150,6 +150,8 @@ Roles, the model each is pinned to, and its **default** effort:
     - **Cheap refresh mechanics:** skills execute in the main thread and can't be pinned to a model, so "run on a cheap model" = new rule 7: the skill delegates bulk fetching/extraction to a cheap subagent (`general-purpose` + `haiku` override at `low` effort; scout can't do it — no web tools) which returns only a compact ID/price table; the main thread only cross-checks, diffs, and gates. Full page dumps never enter the expensive context.
     - **Codex effort column:** terra reviews = medium; sol security audit = high; sol judgment audit = xhigh (the hardest, most subjective work mirrors oracle's xhigh). Passed per-call; if pass-through is unsupported (same unverified caveat as the model flag), falls back to profile defaults set once in `.codex/config.toml`.
 
+11. **(2026-07-23) Real context meter via a UserPromptSubmit hook, built on transcript `usage` (not bytes/4).** Every `assistant` JSONL line carries `.message.usage` — exact API token accounting; the last non-sidechain turn's `input+cache_read+cache_creation+output` is true context occupancy and auto-resets after `/compact`. Chosen over a bytes/4 estimate (which can't survive compaction — the file keeps growing while context resets) and over reading the statusline payload (unverified for hooks; noted as a future upgrade). **Denominator default 1,000,000, not 200k:** the live session read 293,676 tokens on fable — 200k would show 146% and nag every prompt (the exact behavior of correction §6, 2026-07-09). Knob: `CLAUDE_CONTEXT_WINDOW`. **Stepped band-crossing (70/80/90), stateful per session** (`$TMPDIR/claude-context-meter/<id>.band`) over per-prompt injection — minimal noise, honors never-nag; the injected line persists in history. **settings.json = opt-in `--with-context-hook` only**, jq merge with backup + `jq empty` validation + idempotency guard, degrades to manual instructions without jq; default install untouched (mirrors decisions 8/9's refusal to poke Claude Code state). Hook always exits 0 — never blocks a prompt.
+
 ---
 
 ## 6. Corrections & behavior updates (this session)
@@ -158,6 +160,7 @@ Roles, the model each is pinned to, and its **default** effort:
 - **Pure-static effort was the wrong first instinct.** I corrected it toward the hybrid (per-role default + orchestrator dynamic override). Apply the hybrid going forward.
 - **"Always auto-probe"** overrode the architect's "prompt interactively, probe only non-interactively" design. Detection must require no user input.
 - **Don't gut the public README.** README is a product front door for cloners; keep it functional, don't strip it to links-only. (This was my call during wrap-up, recorded so it stays.)
+- **(2026-07-09) Don't nag about `/compact`.** Verbatim: *"ok so now you're just asking me to compact at every prompt. I don't like this"* — the compaction rule was rewritten to suggest-once-per-high-context-stretch, silently do the summary hygiene, and treat auto-compaction as a fine fallback. Never repeat an unacted-on suggestion.
 
 ---
 

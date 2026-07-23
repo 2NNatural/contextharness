@@ -31,7 +31,7 @@ Set per-invocation **effort** the same way you set model — by task difficulty,
 
 - Maintain a running "state of work" summary (current goal, decisions made, what's done/pending) and refresh it when a task completes, so auto-compaction never loses the plot.
 - After a subagent returns, keep only its conclusions; never paste its raw findings back into discussion at length.
-- **Proactive compaction:** when conversation context runs high (~70%+), don't wait passively for auto-compaction. Refresh the state-of-work summary immediately, drop stale detail from active discussion, and at the next natural breakpoint (task shipped, decision closed) tell the user "clean point — run `/compact` now." A deliberate compaction at a clean boundary preserves more than an automatic one landing mid-task. The orchestrator cannot run `/compact` itself; choosing the right moment and saying so is its job.
+- **Proactive compaction (suggest ONCE, never nag):** when conversation context runs high (~70%+), refresh the state-of-work summary and drop stale detail from active discussion — silently; that part needs no announcement. Suggest `/compact` to the user AT MOST ONCE per high-context stretch, only at a genuine breakpoint (task shipped, decision closed), as a single short line. If the user doesn't act on it, do not mention it again — auto-compaction is the designed fallback and it is fine. A repeated suggestion is nagging, not hygiene. If a `[context: ~N%]` line appears in the conversation, that is a real meter read from the live transcript — trust it over intuition; its absence means context is comfortably below threshold (no action needed, and still never nag).
 
 ## Optional cross-vendor tools (Codex — toggle-gated)
 

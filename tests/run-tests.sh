@@ -31,6 +31,9 @@ symlinks_supported() {
   return "${ok}"
 }
 
+# Capability probe: is jq available for the settings.json merge tests?
+jq_available() { command -v jq >/dev/null 2>&1; }
+
 # Detect whether chmod 000 actually blocks reads for the current user.
 # On NTFS (including via Git Bash/MSYS), chmod 000 does not enforce
 # unreadability, which would otherwise make T14 a false fail.
@@ -211,6 +214,78 @@ H="$SANDBOX/t21"; mkdir -p "$H"; run "$H"
 [ ! -e "$H/.claude/codex-routing.on" ] && pass "T21a fresh install leaves Codex toggle OFF (absent)" || fail "T21a toggle created"
 touch "$H/.claude/codex-routing.on"; run "$H"
 [ -e "$H/.claude/codex-routing.on" ] && pass "T21b re-run preserves Codex toggle" || fail "T21b toggle clobbered"
+
+# T22 default install does NOT create the hook or touch settings.json
+H="$SANDBOX/t22"; mkdir -p "$H"; run "$H"
+[ ! -e "$H/.claude/hooks/context-meter.sh" ] && [ ! -e "$H/.claude/settings.json" ] \
+  && pass "T22 default install leaves hook + settings.json absent" || fail "T22 hook/settings created by default"
+
+# T23 --with-context-hook installs the script executable
+# (--top-model opus pinned throughout T23-T26 to skip the live tier probe,
+#  which shells out to a real `claude` CLI if present and can mutate the
+#  sandbox settings.json as an unrelated side effect — irrelevant here but
+#  would make the settings-merge assertions below non-deterministic.)
+H="$SANDBOX/t23"; mkdir -p "$H"
+HOME="$H" bash "$REPO/install.sh" --top-model opus --with-context-hook >/dev/null 2>&1
+[ -f "$H/.claude/hooks/context-meter.sh" ] && [ -x "$H/.claude/hooks/context-meter.sh" ] \
+  && pass "T23 hook script installed + executable" || fail "T23 hook not installed"
+
+# T24 settings.json merge: valid JSON, our command present, idempotent
+if jq_available; then
+  grep -q 'context-meter.sh' "$H/.claude/settings.json" \
+    && jq empty "$H/.claude/settings.json" 2>/dev/null \
+    && pass "T24a settings.json merged, valid, references hook" || fail "T24a merge/validity"
+  cp "$H/.claude/settings.json" "$SANDBOX/t24.before"
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --with-context-hook >/dev/null 2>&1
+  cmp -s "$SANDBOX/t24.before" "$H/.claude/settings.json" \
+    && pass "T24b merge idempotent (second run byte-identical)" || fail "T24b not idempotent"
+else
+  skip "T24 (jq unavailable — settings merge path skipped)"
+fi
+
+# T25 merge preserves pre-existing user settings.json content (model + a user hook)
+if jq_available; then
+  H="$SANDBOX/t25"; mkdir -p "$H/.claude"
+  printf '{"model":"opus","hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"/usr/bin/true"}]}]}}\n' \
+    > "$H/.claude/settings.json"
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --with-context-hook >/dev/null 2>&1
+  jq empty "$H/.claude/settings.json" 2>/dev/null \
+    && [ "$(jq -r '.model' "$H/.claude/settings.json")" = "opus" ] \
+    && grep -q '/usr/bin/true' "$H/.claude/settings.json" \
+    && grep -q 'context-meter.sh' "$H/.claude/settings.json" \
+    && pass "T25 existing settings + user hook preserved through merge" || fail "T25 user settings clobbered"
+else
+  skip "T25 (jq unavailable)"
+fi
+
+# T26 --remove-context-hook strips our entry, keeps user content, removes script
+if jq_available; then
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --remove-context-hook >/dev/null 2>&1
+  [ ! -e "$H/.claude/hooks/context-meter.sh" ] \
+    && jq empty "$H/.claude/settings.json" 2>/dev/null \
+    && ! grep -q 'context-meter.sh' "$H/.claude/settings.json" \
+    && grep -q '/usr/bin/true' "$H/.claude/settings.json" \
+    && [ "$(jq -r '.model' "$H/.claude/settings.json")" = "opus" ] \
+    && pass "T26 remove: hook gone, user settings intact" || fail "T26 remove wrong"
+else
+  skip "T26 (jq unavailable)"
+fi
+
+# T27 hook logic: above-band prints [context: ~N%], below-band prints nothing
+HOOK="$REPO/hooks/context-meter.sh"
+if jq_available && [ -f "$HOOK" ]; then
+  TJ="$SANDBOX/t27.jsonl"
+  printf '%s\n' '{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":900000,"output_tokens":0}}}' > "$TJ"
+  out="$(printf '{"session_id":"t27a","transcript_path":"%s"}' "$TJ" \
+         | TMPDIR="$SANDBOX/t27state_a" bash "$HOOK" 2>/dev/null)"
+  echo "$out" | grep -qE '\[context: ~9[0-9]%\]' && pass "T27a fires above band" || fail "T27a no fire: '$out'"
+  printf '%s\n' '{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":100000,"output_tokens":0}}}' > "$TJ"
+  out="$(printf '{"session_id":"t27b","transcript_path":"%s"}' "$TJ" \
+         | TMPDIR="$SANDBOX/t27state_b" bash "$HOOK" 2>/dev/null)"
+  [ -z "$out" ] && pass "T27b silent below band" || fail "T27b unexpected output: '$out'"
+else
+  skip "T27 (jq unavailable or hook missing)"
+fi
 
 echo ""
 echo "=== RESULTS: $P passed, $F failed, $S skipped ==="

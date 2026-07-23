@@ -15,6 +15,7 @@
 | Per-role effort defaults | ✅ Done | scout=low, executor=medium, architect=high, oracle=xhigh |
 | Effort-override routing rule | ✅ Done | In `routing-rules.md`, installed into `~/.claude/CLAUDE.md` |
 | Orchestrator model/effort guidance | ✅ Decided | opus + medium (not max); documented in CONTEXT.md §5 |
+| Context-meter hook | ✅ Done | opt-in `--with-context-hook`; band-crossing 70/80/90; transcript-usage based |
 
 ---
 
@@ -102,3 +103,23 @@ Fixed one real portability bug and added environment skip-guards for two tests t
 
 ### Verified
 `bash tests/run-tests.sh` on Windows/Git Bash: `=== RESULTS: 21 passed, 0 failed, 2 skipped ===`, exit 0 (T2 passes, T10/T14 SKIP, all others still PASS).
+
+---
+
+## Session 2026-07-23
+
+Two threads of work: (1) a same-day nag-fix follow-up to the compaction rule, and (2) a new opt-in context-meter hook.
+
+### Nag-fix follow-up (routing-rules.md rewrite + CONTEXT correction)
+- `routing-rules.md` — rewrote the "Proactive compaction" bullet to "suggest ONCE, never nag": refresh the state-of-work summary and drop stale detail silently (no announcement needed), suggest `/compact` at most once per high-context stretch at a genuine breakpoint, never repeat an unacted-on suggestion.
+- `CONTEXT.md` — added §6 correction entry logging the verbatim user feedback ("ok so now you're just asking me to compact at every prompt. I don't like this") that drove the rewrite.
+
+### New: context-meter hook (opt-in)
+- **New `hooks/context-meter.sh`** — `UserPromptSubmit` hook. Reads the session transcript's real `.message.usage` token accounting (last non-sidechain `assistant` turn), computes `%` against a configurable denominator (`CLAUDE_CONTEXT_WINDOW`, default 1,000,000), and injects a one-line `[context: ~N%]` marker only on first crossing of the 70/80/90 bands (stateful per session in `$TMPDIR/claude-context-meter/<id>.band`). Prints nothing below threshold. Always exits 0; degrades to a no-op if `jq` is missing.
+- **`install.sh`** — new opt-in flags `--with-context-hook` / `--remove-context-hook`. Default install never touches `hooks/` or `settings.json`. `--with-context-hook` copies the script to `~/.claude/hooks/`, `chmod +x`s it, and (if `jq` present) merges a `UserPromptSubmit` registration into `~/.claude/settings.json` — validated (`jq empty`), idempotent, backed up before every write, preserves all pre-existing settings content (model, other hooks). `--remove-context-hook` strips only our entry and deletes the script, leaving everything else intact. Without `jq`, prints manual merge instructions instead of touching the file. Added "Optional context meter" line to the post-install next-steps message.
+- **`routing-rules.md`** — appended a sentence to the Proactive compaction bullet: a `[context: ~N%]` line in the conversation is a real meter read to trust over intuition; its absence means comfortably below threshold (still never nag).
+- **`tests/run-tests.sh`** — added `jq_available()` capability probe and T22–T27: T22 (default install leaves hook/settings absent), T23 (hook installed + executable), T24 (settings merge valid + idempotent), T25 (pre-existing settings/model/user-hook preserved through merge), T26 (`--remove-context-hook` strips only our entry, keeps user content), T27 (hook logic — fires above band, silent below band, using a synthetic transcript). T23–T26 pin `--top-model opus` to bypass the live tier probe (which shells out to the real `claude` CLI and can mutate the sandbox `settings.json`'s `.model` as an unrelated side effect, which would make the settings-merge assertions flaky).
+- **README.md / CONTEXT.md / ROADMAP.md** — documented the feature (see "Optional: context meter" section, CONTEXT.md §5 decision 11, and two new `[MAYBE]` roadmap items on smarter denominator detection).
+
+### Verified
+`bash tests/run-tests.sh`: `=== RESULTS: 31 passed, 0 failed, 0 skipped ===`, exit 0.

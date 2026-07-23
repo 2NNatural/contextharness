@@ -29,6 +29,12 @@
 ### [MAYBE] Support a genuinely new model *class*
 - If Anthropic ships a new tier (e.g. a nano class below haiku, or a specialized coding model) that deserves its own agent, the refresh skill won't create it (safe scope). Would need a human-designed new agent slot via `architect`.
 
+### [MAYBE] Statusline-payload denominator (auto-detect true window instead of CLAUDE_CONTEXT_WINDOW knob)
+- The context-meter hook currently uses a fixed default denominator overridden by an env var. If the statusline hook payload (or another Claude Code surface) reliably exposes the actual context window for the active model, the meter could auto-detect it instead of requiring manual configuration.
+
+### [MAYBE] Model-map denominator (derive 200k vs 1M from .message.model + [1m] marker if a reliable signal exists)
+- Transcript lines carry `.message.model`. If a dependable mapping from model ID (plus the `[1m]` context-window marker) to true window size exists, the context-meter hook could pick the right denominator per-model automatically instead of one global default.
+
 ---
 
 ## Done / archived (moved out of active roadmap — full detail in PROGRESS.md)

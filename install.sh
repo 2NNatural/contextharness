@@ -10,6 +10,10 @@ SKILLS_SRC="${REPO_DIR}/skills"
 SKILLS_DIR="${CLAUDE_DIR}/skills"
 CLAUDE_MD="${CLAUDE_DIR}/CLAUDE.md"
 RULES_FILE="${REPO_DIR}/routing-rules.md"
+HOOKS_SRC="${REPO_DIR}/hooks"
+HOOKS_DIR="${CLAUDE_DIR}/hooks"
+SETTINGS_FILE="${CLAUDE_DIR}/settings.json"
+HOOK_NEEDLE='context-meter.sh'
 START_MARKER='<!-- model-harness:start -->'
 END_MARKER='<!-- model-harness:end -->'
 
@@ -60,6 +64,8 @@ probe_top_model() {
 
 # --- Parse --top-model flag (supports --top-model VALUE and --top-model=VALUE) ---
 TOP_MODEL=""
+WITH_CONTEXT_HOOK=0
+REMOVE_CONTEXT_HOOK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --top-model=*)
@@ -74,6 +80,8 @@ while [ $# -gt 0 ]; do
       TOP_MODEL="$2"
       shift 2
       ;;
+    --with-context-hook)  WITH_CONTEXT_HOOK=1;  shift ;;
+    --remove-context-hook) REMOVE_CONTEXT_HOOK=1; shift ;;
     *)
       echo "error: unknown argument: $1" >&2
       exit 1
@@ -154,6 +162,74 @@ if [ -d "${SKILLS_SRC}" ]; then
     cp "$d"*.md "${SKILLS_DIR}/${name}/"
     echo "installed skill: ${SKILLS_DIR}/${name}"
   done
+fi
+
+# 1c. Optional context-meter hook (opt-in; default install never touches settings.json).
+CONTEXT_HOOK_SCRIPT="${HOOKS_DIR}/context-meter.sh"
+HOOK_CMD="${CONTEXT_HOOK_SCRIPT}"
+
+print_manual_hook_instructions() {
+  cat >&2 <<EOF
+To enable the context meter manually, add this to ${SETTINGS_FILE}:
+  "hooks": { "UserPromptSubmit": [ { "hooks": [
+    { "type": "command", "command": "${HOOK_CMD}" } ] } ] }
+EOF
+}
+
+if [ "${REMOVE_CONTEXT_HOOK:-0}" -eq 1 ]; then
+  if command -v jq >/dev/null 2>&1 && [ -f "${SETTINGS_FILE}" ]; then
+    tmp="$(mktemp)"
+    if jq --arg n "${HOOK_NEEDLE}" '
+          if (.hooks.UserPromptSubmit? | type) == "array" then
+            .hooks.UserPromptSubmit |=
+              (map(.hooks |= map(select(((.command // "") | contains($n)) | not)))
+               | map(select((.hooks | length) > 0)))
+          else . end
+        ' "${SETTINGS_FILE}" > "${tmp}" 2>/dev/null && jq empty "${tmp}" 2>/dev/null; then
+      cp "${SETTINGS_FILE}" "${SETTINGS_FILE}.harness-bak.$(date +%Y%m%d%H%M%S)"
+      cat "${tmp}" > "${SETTINGS_FILE}"
+      echo "removed context-meter hook registration from ${SETTINGS_FILE}"
+    fi
+    rm -f "${tmp}"
+  fi
+  rm -f "${CONTEXT_HOOK_SCRIPT}"
+  echo "removed ${CONTEXT_HOOK_SCRIPT}"
+elif [ "${WITH_CONTEXT_HOOK:-0}" -eq 1 ]; then
+  if [ -f "${HOOKS_SRC}/context-meter.sh" ]; then
+    mkdir -p "${HOOKS_DIR}"
+    cp "${HOOKS_SRC}/context-meter.sh" "${CONTEXT_HOOK_SCRIPT}"
+    chmod +x "${CONTEXT_HOOK_SCRIPT}"
+    echo "installed hook: ${CONTEXT_HOOK_SCRIPT}"
+    if command -v jq >/dev/null 2>&1; then
+      touch "${SETTINGS_FILE}"
+      [ -s "${SETTINGS_FILE}" ] || printf '{}\n' > "${SETTINGS_FILE}"
+      if jq -e --arg c "${HOOK_CMD}" '
+            [ .hooks.UserPromptSubmit[]?.hooks[]?.command ] | any(. == $c)
+          ' "${SETTINGS_FILE}" >/dev/null 2>&1; then
+        echo "context-meter hook already registered in ${SETTINGS_FILE} (idempotent)"
+      else
+        tmp="$(mktemp)"
+        if jq --arg c "${HOOK_CMD}" '
+              .hooks = (.hooks // {})
+              | .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // [])
+              | .hooks.UserPromptSubmit += [ { "hooks": [ { "type": "command", "command": $c } ] } ]
+            ' "${SETTINGS_FILE}" > "${tmp}" 2>/dev/null && jq empty "${tmp}" 2>/dev/null; then
+          cp "${SETTINGS_FILE}" "${SETTINGS_FILE}.harness-bak.$(date +%Y%m%d%H%M%S)"
+          cat "${tmp}" > "${SETTINGS_FILE}"
+          echo "registered context-meter hook in ${SETTINGS_FILE} (backup written)"
+        else
+          echo "warning: could not safely merge ${SETTINGS_FILE}; left untouched" >&2
+          print_manual_hook_instructions
+        fi
+        rm -f "${tmp}"
+      fi
+    else
+      echo "warning: jq not found — hook script copied but not registered" >&2
+      print_manual_hook_instructions
+    fi
+  else
+    echo "warning: ${HOOKS_SRC}/context-meter.sh not found; skipping hook install" >&2
+  fi
 fi
 
 # 1a. If top model is opus, rewrite the INSTALLED oracle.md only (repo copy untouched).
@@ -239,6 +315,7 @@ Done. Next steps:
   3. Set your orchestrator model once: /model opus
      (or make it the default by adding  "model": "opus"  to ~/.claude/settings.json)
   4. To update later: git pull && ./install.sh --top-model opus
+  5. Optional context meter: ./install.sh --with-context-hook
 EOF
 else
   cat <<EOF
@@ -249,5 +326,6 @@ Done. Next steps:
   3. Set your orchestrator model once: /model claude-fable-5[1m]
      (or make it the default by adding  "model": "claude-fable-5[1m]"  to ~/.claude/settings.json)
   4. To update later: git pull && ./install.sh --top-model fable
+  5. Optional context meter: ./install.sh --with-context-hook
 EOF
 fi
