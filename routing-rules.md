@@ -31,6 +31,7 @@ Set per-invocation **effort** the same way you set model — by task difficulty,
 
 - Maintain a running "state of work" summary (current goal, decisions made, what's done/pending) and refresh it when a task completes, so auto-compaction never loses the plot.
 - After a subagent returns, keep only its conclusions; never paste its raw findings back into discussion at length.
+- **Proactive compaction:** when conversation context runs high (~70%+), don't wait passively for auto-compaction. Refresh the state-of-work summary immediately, drop stale detail from active discussion, and at the next natural breakpoint (task shipped, decision closed) tell the user "clean point — run `/compact` now." A deliberate compaction at a clean boundary preserves more than an automatic one landing mid-task. The orchestrator cannot run `/compact` itself; choosing the right moment and saying so is its job.
 
 ## Optional cross-vendor tools (Codex — toggle-gated)
 
