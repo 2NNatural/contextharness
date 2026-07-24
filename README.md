@@ -75,7 +75,7 @@ A local `UserPromptSubmit` hook that reads real token usage from the session tra
 ./install.sh --remove-context-hook   # unregisters + deletes the script
 ```
 
-Requires `jq`. The default context window is **1,000,000** (fable 1M / opus-4.8 / sonnet-5); on a 200k-capped plan set `CLAUDE_CONTEXT_WINDOW=200000`. The merge is idempotent and non-destructive — your existing `settings.json` (model, other hooks) is preserved and backed up before any write.
+Requires `jq`. The default context window is **1,000,000** (fable 1M / opus-5 / sonnet-5); on a 200k-capped plan set `CLAUDE_CONTEXT_WINDOW=200000`. The merge is idempotent and non-destructive — your existing `settings.json` (model, other hooks) is preserved and backed up before any write.
 
 ## Tune it
 

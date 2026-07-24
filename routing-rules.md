@@ -39,7 +39,7 @@ The OpenAI Codex plugin (`/codex:*` commands, `codex:codex-rescue` subagent) is 
 
 **Codex OFF (default — fresh installs and anyone without the plugin):** never auto-invoke any `/codex:*` command or `codex:codex-rescue`. Do not route to them or present them as an automatic step — they run only when the user types the command by name. You may *remind* the user they exist, but wait for the literal command.
 
-**Codex ON:** you MAY route the READ-ONLY, cross-vendor second opinions below automatically — always *alongside*, never *instead of*, the Claude ladder. Route only when a change/plan is genuinely risky or consequential (the same bar that warrants `architect`), not routinely. Pick the GPT-5.6 tier per task (IDs current 2026-07-09; user-maintained in `.codex/config.toml`, may drift):
+**Codex ON:** you MAY route the READ-ONLY, cross-vendor second opinions below automatically — always *alongside*, never *instead of*, the Claude ladder. Route only when a change/plan is genuinely risky or consequential (the same bar that warrants `architect`), not routinely. Pick the GPT-5.6 tier per task (IDs re-verified 2026-07-24; user-maintained in `.codex/config.toml`, may drift):
 
 | Task | Tier | Effort | Confirm with user first? |
 |---|---|---|---|
