@@ -16,6 +16,10 @@
 | Effort-override routing rule | ✅ Done | In `routing-rules.md`, installed into `~/.claude/CLAUDE.md` |
 | Orchestrator model/effort guidance | ✅ Decided | opus + medium (not max); documented in CONTEXT.md §5 |
 | Context-meter hook | ✅ Done | opt-in `--with-context-hook`; band-crossing 70/80/90; transcript-usage based |
+| Audit Standard | ✅ Done | lives in `routing-rules.md`, installed into `~/.claude/CLAUDE.md`; `architect.md` carries a summary as degrade path |
+| `/audit` skill | ✅ Done, not live-tested | runtime `awk` extraction, ≤8-scout liveness fan-out, read-only `architect` verdict, hard gate on the four required lists |
+| Interface inventory template | ✅ Done | `templates/INTERFACES.md`, installed only via standalone `--init-inventory` |
+| Destructive guard | ✅ Done, blocking unverified live | opt-in `--with-destructive-guard`; PreToolUse/Bash; fail-open; not yet confirmed to actually block inside a real `claude --debug` session |
 
 ---
 
@@ -123,3 +127,34 @@ Two threads of work: (1) a same-day nag-fix follow-up to the compaction rule, an
 
 ### Verified
 `bash tests/run-tests.sh`: `=== RESULTS: 31 passed, 0 failed, 0 skipped ===`, exit 0.
+
+---
+
+## Session 2026-09-02
+
+Built the Audit Standard, `/audit` skill, interface-inventory template + install mode, and an opt-in destructive-guard hook — plus a test-expectation fix for upstream oracle-pin drift.
+
+### Built
+- `routing-rules.md` — new "## Audit Standard" section (sections A–E, four required output lists, Pre-live gate, routing note) inside the marker block, so it installs into every project's `~/.claude/CLAUDE.md`. Triggered by "audit"/"review"/"check"/"verify"/"is this safe" or the shorthand "syntax + code + unknowns".
+- `agents/architect.md` — new closing paragraph: apply the Audit Standard in full for audit/review requests, with a fallback summary if the orchestrator didn't paste the standard.
+- `skills/audit/SKILL.md` — new `/audit` skill: resolves the target (Step 0), extracts the standard verbatim from `~/.claude/CLAUDE.md` via `awk` with an integrity check and hard abort on failure (Step 1), reads `INTERFACES.md` if present (Step 2), fans out ≤8 `scout` calls for liveness evidence (Step 3), dispatches one read-only `architect` at effort high+ (Step 4), gates the verdict on the four required lists with one retry and an `AUDIT INCOMPLETE` fallback label (Step 5), and offers a toggle-gated Codex second opinion alongside (never instead of) the Claude verdict (Step 6).
+- `templates/INTERFACES.md` — new interface-inventory template: Link/Mechanism/Direction/Join key/Last verified live columns, one example row, one `NEVER FIRED` row, and a "Column meanings" section.
+- `hooks/destructive-guard.sh` — new opt-in `PreToolUse`/Bash hook. Blocks `rm`/`rmdir`/`mv`/`shred`/`del`/`Remove-Item`/`git clean` when any inspectable target resolves outside a scratchpad/temp root. Fail-open (missing `jq`, empty/unparseable payload → allow). Two escape hatches: inline `HARNESS_ALLOW_DESTRUCTIVE=1 <cmd>` (main-thread only) and the env master switch (works unconditionally, including for subagents). `HARNESS_GUARD_SCOPE=subagent` narrows enforcement to payloads carrying `.agent_id`/`.agent_type`, with a verify-on-your-build caveat. Emits both documented `PreToolUse` deny mechanisms (exit 2 + stderr, and the deny JSON on stdout) since the two shipped reference hook implementations disagree on which one is authoritative.
+- `agents/executor.md` — new rule 6: never delete/move/overwrite files outside the task's named paths; scratch output only to the scratchpad directory; read-only tasks make no writes anywhere else.
+- `install.sh` — `--with-destructive-guard` / `--remove-destructive-guard` (mirrors the context-meter hook's install/merge/remove pattern, registered under `.hooks.PreToolUse` with a `Bash` matcher); standalone `--init-inventory` mode (refuses to combine with other flags, refuses `$HOME`/`~/.claude`, never overwrites, exits before the tier probe and before any `~/.claude` work — the one documented exception to "installer writes only `~/.claude`"); new `HARNESS_SKIP_PROBE=1` test-only escape hatch in `probe_top_model()`; post-install "Next steps" heredocs gained the guard and inventory lines.
+- `tests/run-tests.sh` — new T28 (Audit Standard propagates into installed `CLAUDE.md` + `architect.md`), T29 (`/audit` skill installs), T30 (`--init-inventory` create/no-overwrite/no-`~/.claude`-touch/refuses-combining), T31 (destructive-guard install/merge/idempotent/remove, mirrors T22–T26), T32 (guard logic — blocks outside scratch, allows inside scratch, both escape hatches, subagent hatch refusal, valid deny JSON, helpful denial message, fails open on bad payload). Suite-wide `export HARNESS_SKIP_PROBE=1`; T16/T20 explicitly `-u HARNESS_SKIP_PROBE` so they keep exercising the real non-TTY/no-API fallback.
+- `README.md` — new "Optional: destructive guard" and "## Audit Standard" (with `/audit` and "Interface inventory" subsections) sections; Files table gained the three new files and an updated test-count/description; status line bumped.
+
+### Fixed (F1/F2 — discovered by the prior test run, not part of the original plan)
+- `tests/run-tests.sh` T15a/T15b/T16/T20 asserted `model: claude-fable-5[1m]`; commit `f877029` (same day, `routing-refresh`) had re-pinned `agents/oracle.md` to `claude-fable-5-1[1m]` without updating these expectations. Updated all four to the current pinned string.
+- `install.sh`'s `probe_top_model()` still probed the old base id (`claude -p --model claude-fable-5`); synced to `claude-fable-5-1` to match the current pin. `CONTEXT.md` §3's `claude` CLI bullet updated to match.
+
+### Verified
+`bash tests/run-tests.sh`: `=== RESULTS: 53 passed, 0 failed, 0 skipped ===`, exit 0. Wall time ~2.4s (down from 16.6s/4-failed before this session — almost entirely `HARNESS_SKIP_PROBE` removing ~21 real `claude` CLI shell-outs from the suite).
+
+### Open item owed
+- **Verify live with `claude --debug`** that the `PreToolUse` deny actually blocks the tool call on the current Claude Code build, and whether `.agent_id`/`.agent_type` populate on real subagent payloads. If both check out, `HARNESS_GUARD_SCOPE=subagent` becomes the recommended (lower-friction) default instead of `all`.
+- `/audit` skill has not been exercised in a live session (SKILL.md prose only, unit-tested only via the installer plumbing in T28–T29).
+
+### Known issues / changelog note
+- **Routing-refresh re-pinned the oracle (`f877029`) without checking reverse dependencies** — it left `tests/run-tests.sh`'s expected strings and `install.sh`'s probe id asserting the old `claude-fable-5[1m]` base id. Fixed this session (see F1/F2 above). The gap in `routing-refresh` itself — it should have caught this — is tracked in `ROADMAP.md`.

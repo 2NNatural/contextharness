@@ -1,6 +1,6 @@
 # Model-Routing Harness for Claude Code
 
-**Status:** active · `main` · last session 2026-06-30 (routing-refresh skill + auto tier-detection + effort policy shipped)
+**Status:** active · `main` · last session 2026-09-02 (Audit Standard + /audit skill + interface inventory + destructive guard)
 
 Work in **one long-lived Claude Code thread**, never switch models manually, and pay the cheapest rate for each kind of work. The main thread acts as an orchestrator; token-heavy work (reading code, running tests, deep analysis) is delegated to subagents pinned to cheaper models, each with its own disposable context window.
 
@@ -77,6 +77,40 @@ A local `UserPromptSubmit` hook that reads real token usage from the session tra
 
 Requires `jq`. The default context window is **1,000,000** (fable 1M / opus-5 / sonnet-5); on a 200k-capped plan set `CLAUDE_CONTEXT_WINDOW=200000`. The merge is idempotent and non-destructive — your existing `settings.json` (model, other hooks) is preserved and backed up before any write.
 
+### Optional: destructive guard (opt-in hook)
+
+A local `PreToolUse` hook on the `Bash` tool. It blocks a Bash call when a destructive
+verb (`rm`, `rmdir`, `mv`, `shred`, `del`, `Remove-Item`, `git clean`) appears in the
+command and any target it can see resolves **outside** a scratchpad/temp directory.
+Motivation: an executor subagent on a read-only task deleted an untracked file in the
+user's repo — this is a tripwire against that class of accident.
+
+```sh
+./install.sh --with-destructive-guard     # copies hooks/destructive-guard.sh, registers a PreToolUse/Bash hook (jq merge, backup written)
+./install.sh --remove-destructive-guard   # unregisters + deletes the script
+```
+
+**This is a tripwire against accidents, not a security boundary.** Shell command
+strings cannot be parsed reliably — subshells, eval, xargs, base64, variable
+expansion, aliases, and heredocs all defeat it trivially. It matches command text
+conservatively and will occasionally block a safe command.
+
+Escape hatches, for deliberate operator action:
+- **Inline prefix** — `HARNESS_ALLOW_DESTRUCTIVE=1 <cmd>` — honored only when the call
+  did not come from a subagent (main-thread only; a subagent payload could forge this).
+- **Environment master switch** — `export HARNESS_ALLOW_DESTRUCTIVE=1` before starting
+  Claude Code, or set it in `~/.claude/settings.json` `"env"`. Works unconditionally.
+
+`HARNESS_GUARD_SCOPE=subagent` narrows enforcement to calls that carry
+`.agent_id`/`.agent_type` in the hook payload (lower friction on the main thread).
+Those fields shipped in Claude Code 2.1.69 — **verify they populate on your build**
+(e.g. with `claude --debug`) before relying on this mode; if they never populate,
+`subagent` scope is a silent no-op. Default scope is `all` (every Bash call), which is
+correct even if those fields are absent.
+
+Requires `jq`; fails open (missing `jq`, empty stdin, or an unparseable payload always
+allows the call — a broken guard must never wedge a session).
+
 ## Tune it
 
 - **Delegation too timid / too eager?** Edit the `description:` line in the relevant `agents/*.md` — that's what the orchestrator matches against when deciding to delegate. Stronger wording ("Use PROACTIVELY for ALL …") = more delegation.
@@ -85,6 +119,47 @@ Requires `jq`. The default context window is **1,000,000** (fable 1M / opus-5 / 
 - **Change routing policy:** edit `routing-rules.md`.
 
 Re-run `./install.sh` after any change.
+
+## Audit Standard
+
+Any request containing "audit", "review", "check", "verify", "is this safe", or the
+shorthand **"syntax + code + unknowns"** triggers the harness's Audit Standard. The
+shorthand expands to the whole standard: "syntax" = seams + failure paths, "code" =
+evidence + irreversible actions, "unknowns" = observability. Origin: a production
+post-mortem where each failure lived *between* components that had audited clean in
+isolation.
+
+The standard always ends with four lists, present even when empty — **Claims
+verified/assumed**, **Links with liveness evidence/never fired**, **Irreversible
+actions and their verified guards**, **Unknowns and how to close them**. Missing any
+of the four means the audit is incomplete, not clean.
+
+### /audit
+
+```
+/audit src/exchange/
+/audit current branch
+/audit
+```
+
+A bare `/audit` asks what to audit rather than guessing. How it works: the skill
+extracts the Audit Standard at runtime straight from your installed `~/.claude/CLAUDE.md`
+(never a stale copy), reads the project's `INTERFACES.md` if present, fans out up to
+8 `scout` calls to gather real liveness evidence per link, then hands everything to
+one read-only `architect` at effort high (or above) for the verdict — which is
+returned to you unchanged. When the Codex toggle is on, it can additionally offer a
+read-only cross-vendor second opinion, alongside (never instead of) the Claude verdict.
+
+### Interface inventory
+
+```sh
+cd <project> && <path-to-harness>/install.sh --init-inventory
+```
+
+The one `install.sh` mode that writes outside `~/.claude` — it creates `INTERFACES.md`
+in the current project directory (never overwrites an existing one). Columns: Link,
+Mechanism, Direction, Join key, Last verified live (date + evidence). A link with no
+liveness evidence is reported as **broken**, not as unknown.
 
 ## Optional cross-vendor tools (Codex — toggle-gated)
 
@@ -137,11 +212,14 @@ This deliberately spreads some review/audit load off your Anthropic quota onto y
 | `agents/executor.md` | sonnet, medium effort — scoped implementation + runs tests/builds; returns short report |
 | `agents/architect.md` | opus, high effort — read-only design/debugging/review; returns plan for executor |
 | `agents/oracle.md` | top model, xhigh effort (fable 1M or opus) — read-only huge-context analysis & last-resort reasoning |
-| `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` |
+| `routing-rules.md` | the block installed into `~/.claude/CLAUDE.md` (routing table + Audit Standard) |
 | `install.sh` | idempotent user-level installer |
 | `hooks/context-meter.sh` | UserPromptSubmit hook — injects `[context: ~N%]` at 70/80/90% band crossings from real transcript usage |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (27 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved, context-meter hook install/merge/remove/logic) |
+| `hooks/destructive-guard.sh` | PreToolUse/Bash hook — opt-in tripwire blocking destructive commands whose target resolves outside a scratchpad/temp dir |
 | `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
+| `skills/audit/SKILL.md` | on-demand `/audit` skill — runs the Audit Standard against a target and gates the verdict |
+| `templates/INTERFACES.md` | interface-inventory template, installed into a project via `--init-inventory` |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (53 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved, context-meter hook install/merge/remove/logic, Audit Standard propagation, `/audit`/inventory install, destructive-guard install/merge/remove/logic) |
 
 ## Test
 

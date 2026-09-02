@@ -14,6 +14,8 @@ HOOKS_SRC="${REPO_DIR}/hooks"
 HOOKS_DIR="${CLAUDE_DIR}/hooks"
 SETTINGS_FILE="${CLAUDE_DIR}/settings.json"
 HOOK_NEEDLE='context-meter.sh'
+GUARD_NEEDLE='destructive-guard.sh'
+TEMPLATES_SRC="${REPO_DIR}/templates"
 START_MARKER='<!-- model-harness:start -->'
 END_MARKER='<!-- model-harness:end -->'
 
@@ -36,11 +38,16 @@ has_any_read_bit() {
 # Drives the `claude` CLI in print mode to reuse Claude Code's own resolved
 # auth (OAuth/keychain/apiKeyHelper) — no ANTHROPIC_API_KEY required.
 probe_top_model() {
+  # Test-only escape hatch. tests/run-tests.sh exports HARNESS_SKIP_PROBE=1 so the
+  # suite never shells out to the real `claude` CLI (up to 25s per install run,
+  # ~21 runs = >2min on Windows). Returns "" = inconclusive, which the caller
+  # already handles. Never set this in normal use.
+  if [ -n "${HARNESS_SKIP_PROBE:-}" ]; then printf ''; return 0; fi
   if command -v claude >/dev/null 2>&1; then
     local runner=""
     if command -v timeout >/dev/null 2>&1; then runner="timeout 25"
     elif command -v gtimeout >/dev/null 2>&1; then runner="gtimeout 25"; fi
-    if ${runner} claude -p --model claude-fable-5 --max-turns 1 'hi' >/dev/null 2>&1; then
+    if ${runner} claude -p --model claude-fable-5-1 --max-turns 1 'hi' >/dev/null 2>&1; then
       printf 'fable'; return 0
     fi
     printf 'opus'; return 0
@@ -66,10 +73,15 @@ probe_top_model() {
 TOP_MODEL=""
 WITH_CONTEXT_HOOK=0
 REMOVE_CONTEXT_HOOK=0
+WITH_GUARD=0
+REMOVE_GUARD=0
+INIT_INVENTORY=0
+OTHER_FLAGS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --top-model=*)
       TOP_MODEL="${1#--top-model=}"
+      OTHER_FLAGS=1
       shift
       ;;
     --top-model)
@@ -78,16 +90,52 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       TOP_MODEL="$2"
+      OTHER_FLAGS=1
       shift 2
       ;;
-    --with-context-hook)  WITH_CONTEXT_HOOK=1;  shift ;;
-    --remove-context-hook) REMOVE_CONTEXT_HOOK=1; shift ;;
+    --with-context-hook)  WITH_CONTEXT_HOOK=1;  OTHER_FLAGS=1; shift ;;
+    --remove-context-hook) REMOVE_CONTEXT_HOOK=1; OTHER_FLAGS=1; shift ;;
+    --with-destructive-guard)  WITH_GUARD=1;   OTHER_FLAGS=1; shift ;;
+    --remove-destructive-guard) REMOVE_GUARD=1; OTHER_FLAGS=1; shift ;;
+    --init-inventory)          INIT_INVENTORY=1; shift ;;
     *)
       echo "error: unknown argument: $1" >&2
       exit 1
       ;;
   esac
 done
+
+# --- --init-inventory: the ONE mode that writes outside ~/.claude -------------
+# Copies templates/INTERFACES.md into the CURRENT working directory's project.
+# It writes exactly one file, to $PWD, never overwrites, and exits before the
+# tier probe and before ANY ~/.claude work. Every other install.sh code path
+# below this block writes only under ${HOME}/.claude.
+if [ "${INIT_INVENTORY}" -eq 1 ]; then
+  if [ "${OTHER_FLAGS}" -eq 1 ]; then
+    echo "error: --init-inventory must be used alone (it writes to the current project, not ~/.claude)" >&2
+    exit 1
+  fi
+  TEMPLATE="${TEMPLATES_SRC}/INTERFACES.md"
+  [ -f "${TEMPLATE}" ] && [ -r "${TEMPLATE}" ] \
+    || { echo "error: cannot read ${TEMPLATE}" >&2; exit 1; }
+  DEST_DIR="$(pwd)"
+  case "${DEST_DIR}" in
+    "${HOME}"|"${HOME}/"|"${HOME}/.claude"|"${HOME}/.claude/"*)
+      echo "error: refusing to create INTERFACES.md in ${DEST_DIR} — cd into a project directory first" >&2
+      exit 1
+      ;;
+  esac
+  DEST="${DEST_DIR}/INTERFACES.md"
+  if [ -e "${DEST}" ]; then
+    echo "INTERFACES.md already exists in ${DEST_DIR} — leaving it untouched."
+    exit 0
+  fi
+  cp "${TEMPLATE}" "${DEST}"
+  echo "created ${DEST}"
+  echo "Fill in one row per cross-process/cross-service link, then keep the"
+  echo "'last verified live' column current. /audit reads this file."
+  exit 0
+fi
 
 # Validate flag value if provided
 if [ -n "${TOP_MODEL}" ]; then
@@ -232,6 +280,74 @@ elif [ "${WITH_CONTEXT_HOOK:-0}" -eq 1 ]; then
   fi
 fi
 
+# 1d. Optional destructive-guard hook (opt-in; default install never touches settings.json).
+GUARD_SCRIPT="${HOOKS_DIR}/destructive-guard.sh"
+GUARD_CMD="${GUARD_SCRIPT}"
+
+print_manual_guard_instructions() {
+  cat >&2 <<EOF
+To enable the destructive guard manually, add this to ${SETTINGS_FILE}:
+  "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [
+    { "type": "command", "command": "${GUARD_CMD}" } ] } ] }
+EOF
+}
+
+if [ "${REMOVE_GUARD:-0}" -eq 1 ]; then
+  if command -v jq >/dev/null 2>&1 && [ -f "${SETTINGS_FILE}" ]; then
+    tmp="$(mktemp)"
+    if jq --arg n "${GUARD_NEEDLE}" '
+          if (.hooks.PreToolUse? | type) == "array" then
+            .hooks.PreToolUse |=
+              (map(.hooks |= map(select(((.command // "") | contains($n)) | not)))
+               | map(select((.hooks | length) > 0)))
+          else . end
+        ' "${SETTINGS_FILE}" > "${tmp}" 2>/dev/null && jq empty "${tmp}" 2>/dev/null; then
+      cp "${SETTINGS_FILE}" "${SETTINGS_FILE}.harness-bak.$(date +%Y%m%d%H%M%S)"
+      cat "${tmp}" > "${SETTINGS_FILE}"
+      echo "removed destructive-guard hook registration from ${SETTINGS_FILE}"
+    fi
+    rm -f "${tmp}"
+  fi
+  rm -f "${GUARD_SCRIPT}"
+  echo "removed ${GUARD_SCRIPT}"
+elif [ "${WITH_GUARD:-0}" -eq 1 ]; then
+  if [ -f "${HOOKS_SRC}/destructive-guard.sh" ]; then
+    mkdir -p "${HOOKS_DIR}"
+    cp "${HOOKS_SRC}/destructive-guard.sh" "${GUARD_SCRIPT}"
+    chmod +x "${GUARD_SCRIPT}"
+    echo "installed hook: ${GUARD_SCRIPT}"
+    if command -v jq >/dev/null 2>&1; then
+      touch "${SETTINGS_FILE}"
+      [ -s "${SETTINGS_FILE}" ] || printf '{}\n' > "${SETTINGS_FILE}"
+      if jq -e --arg c "${GUARD_CMD}" '
+            [ .hooks.PreToolUse[]?.hooks[]?.command ] | any(. == $c)
+          ' "${SETTINGS_FILE}" >/dev/null 2>&1; then
+        echo "destructive-guard hook already registered in ${SETTINGS_FILE} (idempotent)"
+      else
+        tmp="$(mktemp)"
+        if jq --arg c "${GUARD_CMD}" '
+              .hooks = (.hooks // {})
+              | .hooks.PreToolUse = (.hooks.PreToolUse // [])
+              | .hooks.PreToolUse += [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": $c } ] } ]
+            ' "${SETTINGS_FILE}" > "${tmp}" 2>/dev/null && jq empty "${tmp}" 2>/dev/null; then
+          cp "${SETTINGS_FILE}" "${SETTINGS_FILE}.harness-bak.$(date +%Y%m%d%H%M%S)"
+          cat "${tmp}" > "${SETTINGS_FILE}"
+          echo "registered destructive-guard hook in ${SETTINGS_FILE} (backup written)"
+        else
+          echo "warning: could not safely merge ${SETTINGS_FILE}; left untouched" >&2
+          print_manual_guard_instructions
+        fi
+        rm -f "${tmp}"
+      fi
+    else
+      echo "warning: jq not found — hook script copied but not registered" >&2
+      print_manual_guard_instructions
+    fi
+  else
+    echo "warning: ${HOOKS_SRC}/destructive-guard.sh not found; skipping hook install" >&2
+  fi
+fi
+
 # 1a. If top model is opus, rewrite the INSTALLED oracle.md only (repo copy untouched).
 INSTALLED_ORACLE="${AGENTS_DIR}/oracle.md"
 if [ "${TOP_MODEL}" = "opus" ]; then
@@ -316,6 +432,8 @@ Done. Next steps:
      (or make it the default by adding  "model": "opus"  to ~/.claude/settings.json)
   4. To update later: git pull && ./install.sh --top-model opus
   5. Optional context meter: ./install.sh --with-context-hook
+  6. Optional destructive guard: ./install.sh --with-destructive-guard
+  7. Start an interface inventory in a project: cd <project> && <path-to-harness>/install.sh --init-inventory
 EOF
 else
   cat <<EOF
@@ -327,5 +445,7 @@ Done. Next steps:
      (or make it the default by adding  "model": "claude-fable-5[1m]"  to ~/.claude/settings.json)
   4. To update later: git pull && ./install.sh --top-model fable
   5. Optional context meter: ./install.sh --with-context-hook
+  6. Optional destructive guard: ./install.sh --with-destructive-guard
+  7. Start an interface inventory in a project: cd <project> && <path-to-harness>/install.sh --init-inventory
 EOF
 fi

@@ -20,3 +20,11 @@ Output format:
 - **Evidence / Reasoning:** the key `file:line` citations and the causal chain.
 - **Implementation plan:** concrete steps an executor can follow without re-deriving your analysis — name files, functions, and the verification to run.
 - **Risks:** what could go wrong and how to detect it. Omit if genuinely none.
+
+When the task is an audit or review, apply the **Audit Standard** from the harness
+CLAUDE.md in full: seams one hop past every boundary, join-key samples from both sides,
+silent fallbacks, prod-config path, claims verified vs assumed, liveness per link, cause
+not effect, reverse dependencies, failure / restart / backpressure / concurrency / time
+paths, irreversible-action guards, off switch first, negative tests, post-hoc legibility,
+explicit unknowns. End with the standard's four required lists. If the orchestrator did
+not paste the standard, apply this summary and say so.

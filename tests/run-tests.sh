@@ -6,6 +6,10 @@ set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SANDBOX=$(mktemp -d)
 trap 'rm -rf "$SANDBOX"' EXIT
+# Skip install.sh's live tier probe for the whole suite: it shells out to the
+# real `claude` CLI (up to 25s) on every run without --top-model, ~21 times.
+# T16/T20 explicitly unset it so they still exercise the real fallback path.
+export HARNESS_SKIP_PROBE=1
 run() { HOME="$1" bash "$REPO/install.sh" >/dev/null 2>&1; }
 file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
@@ -150,15 +154,15 @@ HOME="$H" bash "$REPO/install.sh" --top-model opus >/dev/null 2>&1
 installed_oracle="$H/.claude/agents/oracle.md"
 if grep -qx 'model: opus' "$installed_oracle" \
    && ! grep -q 'claude-fable-5' "$installed_oracle" \
-   && grep -qx 'model: claude-fable-5\[1m\]' "$REPO/agents/oracle.md"; then
+   && grep -qx 'model: claude-fable-5-1\[1m\]' "$REPO/agents/oracle.md"; then
   pass "T15a opus: installed oracle has model: opus, repo copy unchanged"
 else
   fail "T15a opus: installed oracle model wrong or repo copy modified"
 fi
 # Now switch back to fable in the same HOME
 HOME="$H" bash "$REPO/install.sh" --top-model fable >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5\[1m\]' "$installed_oracle"; then
-  pass "T15b fable: re-run restores installed oracle to model: claude-fable-5[1m]"
+if grep -qx 'model: claude-fable-5-1\[1m\]' "$installed_oracle"; then
+  pass "T15b fable: re-run restores installed oracle to model: claude-fable-5-1[1m]"
 else
   fail "T15b fable: installed oracle not restored"
 fi
@@ -166,9 +170,9 @@ fi
 # T16: no flag, stdin not a TTY -> defaults to fable silently
 # Strip ANTHROPIC_API_KEY and claude CLI from PATH so probe is deterministically inconclusive.
 H="$SANDBOX/t16"; mkdir -p "$H"
-env -u ANTHROPIC_API_KEY HOME="$H" PATH="/usr/bin:/bin" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5\[1m\]' "$H/.claude/agents/oracle.md"; then
-  pass "T16 non-TTY default: installed oracle retains model: claude-fable-5[1m]"
+env -u ANTHROPIC_API_KEY -u HARNESS_SKIP_PROBE HOME="$H" PATH="/usr/bin:/bin" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
+if grep -qx 'model: claude-fable-5-1\[1m\]' "$H/.claude/agents/oracle.md"; then
+  pass "T16 non-TTY default: installed oracle retains model: claude-fable-5-1[1m]"
 else
   fail "T16 non-TTY default: installed oracle wrong"
 fi
@@ -201,9 +205,9 @@ cmp -s "$SANDBOX/t19.before" "$H/.claude/skills/routing-refresh/SKILL.md" \
 
 # T20: tier probe falls back to fable when no API access (non-TTY, no key, no claude CLI)
 H="$SANDBOX/t20"; mkdir -p "$H"
-env -u ANTHROPIC_API_KEY HOME="$H" PATH="/usr/bin:/bin" \
+env -u ANTHROPIC_API_KEY -u HARNESS_SKIP_PROBE HOME="$H" PATH="/usr/bin:/bin" \
   bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5\[1m\]' "$H/.claude/agents/oracle.md"; then
+if grep -qx 'model: claude-fable-5-1\[1m\]' "$H/.claude/agents/oracle.md"; then
   pass "T20 no-API probe falls back to fable"
 else
   fail "T20 probe fallback wrong: $(grep '^model:' "$H/.claude/agents/oracle.md")"
@@ -285,6 +289,110 @@ if jq_available && [ -f "$HOOK" ]; then
   [ -z "$out" ] && pass "T27b silent below band" || fail "T27b unexpected output: '$out'"
 else
   skip "T27 (jq unavailable or hook missing)"
+fi
+
+# T28 Audit Standard propagates into the installed CLAUDE.md and architect.md
+H="$SANDBOX/t28"; mkdir -p "$H"
+HOME="$H" bash "$REPO/install.sh" --top-model opus >/dev/null 2>&1
+if awk '/^<!-- model-harness:start -->$/{f=1;next} /^<!-- model-harness:end -->$/{f=0} f' \
+     "$H/.claude/CLAUDE.md" | grep -q '^## Audit Standard'; then
+  pass "T28a Audit Standard present inside the CLAUDE.md markers"
+else
+  fail "T28a Audit Standard missing from installed CLAUDE.md block"
+fi
+grep -q 'Audit Standard' "$H/.claude/agents/architect.md" \
+  && pass "T28b installed architect.md references the Audit Standard" \
+  || fail "T28b architect.md missing Audit Standard reference"
+
+# T29 /audit skill installs
+[ -f "$H/.claude/skills/audit/SKILL.md" ] && grep -q 'name: audit' "$H/.claude/skills/audit/SKILL.md" \
+  && pass "T29 audit skill installed to HOME" || fail "T29 audit skill not installed"
+
+# T30 --init-inventory: creates in CWD, never overwrites, never touches ~/.claude
+PROJ="$SANDBOX/t30proj"; mkdir -p "$PROJ"
+H="$SANDBOX/t30"; mkdir -p "$H"
+( cd "$PROJ" && HOME="$H" bash "$REPO/install.sh" --init-inventory >/dev/null 2>&1 )
+if [ -f "$PROJ/INTERFACES.md" ] && grep -q 'Last verified live' "$PROJ/INTERFACES.md"; then
+  pass "T30a --init-inventory creates ./INTERFACES.md in the project dir"
+else
+  fail "T30a --init-inventory did not create INTERFACES.md"
+fi
+[ ! -d "$H/.claude" ] && pass "T30b --init-inventory never touches ~/.claude" \
+  || fail "T30b --init-inventory wrote to ~/.claude"
+printf 'MY OWN INVENTORY\n' > "$PROJ/INTERFACES.md"
+( cd "$PROJ" && HOME="$H" bash "$REPO/install.sh" --init-inventory >/dev/null 2>&1 )
+[ "$(cat "$PROJ/INTERFACES.md")" = "MY OWN INVENTORY" ] \
+  && pass "T30c --init-inventory never overwrites an existing file" \
+  || fail "T30c --init-inventory clobbered an existing INTERFACES.md"
+if ( cd "$PROJ" && HOME="$H" bash "$REPO/install.sh" --init-inventory --top-model opus >/dev/null 2>&1 ); then
+  fail "T30d --init-inventory should refuse to combine with other flags"
+else
+  pass "T30d --init-inventory refuses to combine with other flags"
+fi
+
+# T31 destructive-guard opt-in install / merge / remove (mirrors T22-T26)
+H="$SANDBOX/t31"; mkdir -p "$H"; run "$H"
+[ ! -e "$H/.claude/hooks/destructive-guard.sh" ] \
+  && pass "T31a default install leaves the guard absent" || fail "T31a guard installed by default"
+HOME="$H" bash "$REPO/install.sh" --top-model opus --with-destructive-guard >/dev/null 2>&1
+[ -f "$H/.claude/hooks/destructive-guard.sh" ] && [ -x "$H/.claude/hooks/destructive-guard.sh" ] \
+  && pass "T31b guard script installed + executable" || fail "T31b guard not installed"
+if jq_available; then
+  jq empty "$H/.claude/settings.json" 2>/dev/null \
+    && [ "$(jq -r '[.hooks.PreToolUse[]?|select(.matcher=="Bash")]|length' "$H/.claude/settings.json")" -ge 1 ] \
+    && grep -q 'destructive-guard.sh' "$H/.claude/settings.json" \
+    && pass "T31c PreToolUse Bash registration merged and valid" || fail "T31c guard merge/validity"
+  cp "$H/.claude/settings.json" "$SANDBOX/t31.before"
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --with-destructive-guard >/dev/null 2>&1
+  cmp -s "$SANDBOX/t31.before" "$H/.claude/settings.json" \
+    && pass "T31d guard merge idempotent" || fail "T31d guard merge not idempotent"
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --with-context-hook >/dev/null 2>&1
+  HOME="$H" bash "$REPO/install.sh" --top-model opus --remove-destructive-guard >/dev/null 2>&1
+  [ ! -e "$H/.claude/hooks/destructive-guard.sh" ] \
+    && jq empty "$H/.claude/settings.json" 2>/dev/null \
+    && ! grep -q 'destructive-guard.sh' "$H/.claude/settings.json" \
+    && grep -q 'context-meter.sh' "$H/.claude/settings.json" \
+    && pass "T31e remove: guard gone, context-meter registration intact" || fail "T31e remove wrong"
+else
+  skip "T31c-e (jq unavailable — settings merge path skipped)"
+fi
+
+# T32 guard logic: blocked outside scratchpad, allowed inside, escape hatches (mirrors T27)
+GUARD="$REPO/hooks/destructive-guard.sh"
+if jq_available && [ -f "$GUARD" ]; then
+  # A synthetic non-scratch "project" cwd. Cannot use $SANDBOX itself: mktemp -d
+  # returns paths under /var/folders (macOS) or $TMPDIR, which the guard's own
+  # default SCRATCH_ROOTS already treat as scratch — so anything relative to
+  # $SANDBOX would never be flagged as "outside scratch". The guard only does
+  # string prefix matching (no filesystem access), so this path need not exist.
+  FAKE_PROJ="$REPO/.t32-fake-project"
+  gp() { printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":%s}}' \
+           "$FAKE_PROJ" "$(jq -Rn --arg c "$1" '$c')"; }
+  gp 'rm ./NOTES.md' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 2 ] && pass "T32a blocks rm of a project-relative file" || fail "T32a did not block"
+  gp 'rm -rf /tmp/claude-scratch/x' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 0 ] && pass "T32b allows rm inside a scratch/temp root" || fail "T32b blocked a scratchpad path"
+  gp 'git clean -fd' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 2 ] && pass "T32c blocks bare git clean (no inspectable target)" || fail "T32c did not block git clean"
+  gp 'ls -la' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 0 ] && pass "T32d allows a non-destructive command" || fail "T32d blocked a safe command"
+  gp 'HARNESS_ALLOW_DESTRUCTIVE=1 rm ./NOTES.md' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 0 ] && pass "T32e inline escape hatch allows (main thread)" || fail "T32e escape hatch ignored"
+  gp 'rm ./NOTES.md' | HARNESS_ALLOW_DESTRUCTIVE=1 bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 0 ] && pass "T32f env master off switch allows" || fail "T32f env off switch ignored"
+  printf '{"tool_name":"Bash","cwd":"%s","agent_id":"a1","agent_type":"executor","tool_input":{"command":"HARNESS_ALLOW_DESTRUCTIVE=1 rm ./NOTES.md"}}' "$FAKE_PROJ" \
+    | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 2 ] && pass "T32g inline hatch refused for a subagent payload" || fail "T32g subagent bypassed the guard"
+  out="$(gp 'rm ./NOTES.md' | bash "$GUARD" 2>/dev/null)"
+  printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 \
+    && pass "T32h deny emits valid PreToolUse deny JSON on stdout" || fail "T32h bad deny JSON: '$out'"
+  err="$(gp 'rm ./NOTES.md' | bash "$GUARD" 2>&1 >/dev/null)"
+  printf '%s' "$err" | grep -q 'HARNESS_ALLOW_DESTRUCTIVE=1' \
+    && pass "T32i denial message tells the operator how to proceed" || fail "T32i denial message unhelpful"
+  printf 'not json' | bash "$GUARD" >/dev/null 2>&1
+  [ $? -eq 0 ] && pass "T32j fails open on an unparseable payload" || fail "T32j failed closed"
+else
+  skip "T32 (jq unavailable or guard missing)"
 fi
 
 echo ""

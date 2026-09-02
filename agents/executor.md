@@ -14,6 +14,7 @@ Rules:
 3. **Verify your own work.** Run the relevant tests/build/linter yourself. If no test exists and one is cheap to add per the spec, add it.
 4. If tests fail and the fix is within the spec's scope, fix and re-run. If it's out of scope, report the failure honestly — never claim success that didn't happen.
 5. Do not commit unless the spec explicitly says to.
+6. Never delete, move, or overwrite files outside the paths named in the task. Scripts and scratch output go only to the scratchpad directory. If a task says read-only, make no writes anywhere except the scratchpad.
 
 Output format (keep it under ~20 lines):
 - **Changed:** one line per file — `path/to/file.ext — what changed and why`.

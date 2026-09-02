@@ -35,6 +35,16 @@
 ### [MAYBE] Model-map denominator (derive 200k vs 1M from .message.model + [1m] marker if a reliable signal exists)
 - Transcript lines carry `.message.model`. If a dependable mapping from model ID (plus the `[1m]` context-window marker) to true window size exists, the context-meter hook could pick the right denominator per-model automatically instead of one global default.
 
+### [SOON] routing-refresh must check reverse dependencies when re-pinning oracle
+- `f877029` changed the oracle pin (`claude-fable-5[1m]` → `claude-fable-5-1[1m]`) and left `tests/run-tests.sh`'s expected strings and `install.sh`'s tier-probe id asserting the old base id — fixed manually in the 2026-09-02 session (see PROGRESS.md F1/F2).
+- Extend the `routing-refresh` skill's Step 4 to `grep` `tests/` and `install.sh` for the old base id whenever it changes the pin, and include those updates in the same diff-then-confirm gate — so a refresh can never silently leave the test suite or the probe asserting a stale id.
+
+### [MAYBE] Scope the destructive guard to subagents by default
+- Currently `HARNESS_GUARD_SCOPE=all` (every Bash call) is the default, deliberately, because `.agent_id`/`.agent_type` payload fields are unverified on this build. Once verified live with `claude --debug` that those fields populate reliably for subagent calls, switch the recommended default to `subagent` scope for lower main-thread friction.
+
+### [MAYBE] Machine-checkable INTERFACES.md parser for the pre-live gate
+- The Audit Standard's Pre-live gate currently relies on `architect`/`scout` reading `INTERFACES.md` by eye. A small parser that fails the gate automatically on stale (`> N` days) or `NEVER FIRED` rows would make "an unverified link blocked the release" enforceable in CI, not just in a prose audit.
+
 ---
 
 ## Done / archived (moved out of active roadmap — full detail in PROGRESS.md)
@@ -45,3 +55,4 @@
 - ✅ Per-role effort defaults + effort-override routing rule — `9c8bf2b`
 - ✅ Orchestrator model/effort guidance decided (opus + medium) — see CONTEXT.md §5
 - ✅ First live `/routing-refresh` run (confirmed current, zero edits)
+- ✅ Audit Standard + /audit skill + interface inventory + destructive guard (2026-09-02)
