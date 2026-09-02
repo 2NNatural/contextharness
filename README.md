@@ -49,13 +49,13 @@ The installer:
 Without a `--top-model` flag the installer always auto-probes your strongest available model tier first; it only prompts (TTY) or defaults silently to fable (non-TTY) when the probe is inconclusive. You can also pass a flag explicitly:
 
 ```sh
-./install.sh --top-model fable   # default — fable 1M context (oracle uses claude-fable-5[1m])
+./install.sh --top-model fable   # default — fable 1M context (oracle uses claude-fable-5-1[1m])
 ./install.sh --top-model opus    # if fable is unavailable — oracle uses opus instead
 ```
 
 Then set the orchestrator model once to match your chosen tier:
 
-- **fable:** `/model claude-fable-5[1m]` or in `~/.claude/settings.json`: `{ "model": "claude-fable-5[1m]" }`
+- **fable:** `/model claude-fable-5-1[1m]` or in `~/.claude/settings.json`: `{ "model": "claude-fable-5-1[1m]" }`
 - **opus:** `/model opus` or in `~/.claude/settings.json`: `{ "model": "opus" }`
 
 ## Update
