@@ -174,7 +174,7 @@ Independent of the routing harness, you can bolt on OpenAI's official [Codex plu
 /plugin install codex@openai-codex
 ```
 
-Its config lives in `.codex/config.toml` (user or project level) — a separate namespace that does not touch this harness's agents, aliases, or the `~/.claude/CLAUDE.md` block. Pick a model per call with `--model <id>` — GPT-5.6 in three tiers: `gpt-5.6-sol` (flagship; complex-coding, cybersecurity, and research strength; default for bare `gpt-5.6`), `gpt-5.6-terra` (cheaper/faster), `gpt-5.6-luna` (lightest).
+Its config lives in `.codex/config.toml` (user or project level) — a separate namespace that does not touch this harness's agents, aliases, or the `~/.claude/CLAUDE.md` block. Pick a model per call with `--model <id>` — `gpt-6-astra` (GPT-6 Astra, most capable, $10/$50 per MTok, effort up to `xhigh`; needs Codex CLI ≥ 0.153.4; if a call fails, fall back to `gpt-6.1-sol`) above two cheaper GPT-6 tiers: `gpt-6.1-sol` (near-Astra capability, $2/$10 per MTok) and `gpt-6-luna` (lightest, $0.10/$0.50 per MTok, supports effort up to `xhigh` — the CLI rejects `max` — the cheap-diversity default).
 
 ### The toggle
 
@@ -193,12 +193,29 @@ The file survives `./install.sh` re-runs, so `git pull && ./install.sh` never fl
 
   | Task | Tier | Effort | Notes |
   |---|---|---|---|
-  | Adversarial review of a risky change (supplements `architect`) | `gpt-5.6-terra` | medium | cheap cross-vendor diversity |
-  | Second opinion on a high-stakes `architect` plan | `gpt-5.6-terra` | medium | high-stakes plans only |
-  | Security / vulnerability audit of a module or area | `gpt-5.6-sol` | high | orchestrator confirms with you first (priciest tier) |
-  | High-level judgment audit — subjective design/mechanism flaws in functionally-correct code (math repos, prediction-market execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits) | `gpt-5.6-sol` | xhigh | orchestrator confirms with you first (priciest tier) |
+  | Adversarial review of a risky change (supplements `architect`) | `gpt-6-luna` | xhigh | cheap cross-vendor diversity ($0.10/$0.50 per MTok at xhigh effort) |
+  | Second opinion on a high-stakes `architect` plan | `gpt-6-luna` | xhigh | high-stakes plans only |
+  | Security / vulnerability audit of a module or area | `gpt-6-astra` | high | orchestrator confirms with you first (priciest tier) |
+  | High-level judgment audit — subjective design/mechanism flaws in functionally-correct code (math repos, prediction-market execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits) | `gpt-6-astra` | xhigh | orchestrator confirms with you first (priciest tier) |
 
   Even when ON, Codex never does **writes**: implementation stays with `executor` (Claude leads SWE-bench Pro real-issue resolution), and `/codex:rescue` / `codex:codex-rescue`-as-fixer remain user-initiated by name. Routine search and log-digestion stay on `scout` (haiku is cheaper and native). The binding rules live in `routing-rules.md` (installed into `~/.claude/CLAUDE.md`). Effort is passed per-call where supported; otherwise set matching defaults once in `.codex/config.toml`.
+
+### Refreshing the Codex CLI and plugin broker
+
+The Codex plugin keeps a **resident broker** process (`node .../openai-codex/codex/<ver>/scripts/app-server-broker.mjs serve` → `codex app-server`) that pins the CLI version it was spawned with. After `npm install -g @openai/codex@latest`, plugin calls keep using the OLD CLI until that broker is restarted — the symptom is `model is not supported` / `requires a newer version` from the plugin while `codex exec --model <id>` works directly. Don't read that as an account/plan limit.
+
+```sh
+./install.sh --refresh-codex     # toggle ON: runs scripts/codex-refresh.sh --update; toggle OFF: prints a skip line, does nothing
+~/.claude/scripts/codex-refresh.sh [--update] [--dry-run] [--probe <id>[,<id>...]]
+```
+
+`scripts/codex-refresh.sh` (installed to `~/.claude/scripts/` by every `./install.sh` run) logs one line per step:
+1. exits 0 with `codex CLI not installed` if `codex` isn't on PATH;
+2. compares `codex --version` with `npm view @openai/codex version` (skipped, with a note, if npm is missing or offline); installs the update only with `--update`, otherwise prints both versions and the update command;
+3. **always** kills stale broker processes — any process whose command line matches `app-server-broker|codex.*app-server` and does NOT match the exclusion regex `CODEX_REFRESH_EXCLUDE` (default `pmbot\\bot`) — printing each PID and start time; `--dry-run` lists without killing. Uses PowerShell on Windows, `pgrep`/`kill` elsewhere. The plugin respawns the broker on its next call;
+4. `--probe` runs `codex exec --model <id> --skip-git-repo-check -c model_reasoning_effort=low "Reply with exactly: OK"` per ID (120 s timeout) and prints `ACCEPTED <id>` or `REJECTED <id>: <first error line>`; exits non-zero if any ID is rejected.
+
+Idempotent and safe to run anytime (a Codex call in flight at that moment is interrupted). Never prints tokens or keys. With the toggle on, `./install.sh` ends with a one-line reminder of `--refresh-codex`. Codex's reasoning-effort ceiling on the CLI is `xhigh` — it rejects `max`.
 
 **Manual commands (any time, regardless of toggle):** `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`, `/codex:cancel`.
 
@@ -219,7 +236,8 @@ This deliberately spreads some review/audit load off your Anthropic quota onto y
 | `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
 | `skills/audit/SKILL.md` | on-demand `/audit` skill — runs the Audit Standard against a target and gates the verdict |
 | `templates/INTERFACES.md` | interface-inventory template, installed into a project via `--init-inventory` |
-| `tests/run-tests.sh` | sandboxed regression suite for the installer (53 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved, context-meter hook install/merge/remove/logic, Audit Standard propagation, `/audit`/inventory install, destructive-guard install/merge/remove/logic) |
+| `scripts/codex-refresh.sh` | Codex CLI version check/update + kills the plugin's stale resident broker + `--probe` model IDs; installed to `~/.claude/scripts/`, run via `./install.sh --refresh-codex` (toggle-gated) |
+| `tests/run-tests.sh` | sandboxed regression suite for the installer (63 cases — idempotency, content preservation, symlinks, corruption refusal, top-model flag, skill install, Codex toggle preserved, context-meter hook install/merge/remove/logic, Audit Standard propagation, `/audit`/inventory install, destructive-guard install/merge/remove/logic, Codex refresh gating/dry-run/kill scope/probe/script install — all stubbed) |
 
 ## Test
 

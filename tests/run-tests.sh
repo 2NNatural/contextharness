@@ -395,6 +395,118 @@ else
   skip "T32 (jq unavailable or guard missing)"
 fi
 
+# T33 Codex refresh: --refresh-codex gating + scripts/codex-refresh.sh (all stubbed)
+# Stubs for codex/npm/powershell go first on PATH so nothing real is called or killed.
+STUB="$SANDBOX/t33stub"; mkdir -p "$STUB"; STUBLOG="$SANDBOX/t33.log"; : > "$STUBLOG"
+cat > "$STUB/codex" <<'STUBEOF'
+#!/usr/bin/env bash
+case "$1" in
+  --version) echo "codex-cli 1.2.3" ;;
+  exec)
+    shift; model=""
+    while [ $# -gt 0 ]; do case "$1" in --model) model="$2"; shift 2 ;; *) shift ;; esac; done
+    echo "codex exec $model" >> "$T33_LOG"
+    if [ "$model" = "${T33_REJECT:-}" ]; then
+      echo "ERROR: {\"detail\":\"The '$model' model is not supported when using Codex with a ChatGPT account.\"}" >&2; exit 1
+    fi
+    echo "OK" ;;
+esac
+STUBEOF
+cat > "$STUB/npm" <<'STUBEOF'
+#!/usr/bin/env bash
+case "$1" in
+  view) echo "1.2.3" ;;
+  *) echo "npm $*" >> "$T33_LOG" ;;
+esac
+STUBEOF
+cat > "$STUB/powershell" <<'STUBEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *Stop-Process*) echo "KILL $*" >> "$T33_LOG" ;;
+  *) printf '%s\t%s\t%s\n' 4242 2026-01-01T00:00:00 'node C:\cache\openai-codex\scripts\app-server-broker.mjs serve'
+     printf '%s\t%s\t%s\n' 4343 2026-01-01T00:00:01 'node C:\pmbot\bot\x\app-server-broker.mjs serve'
+     printf '%s\t%s\t%s\n' 5555 2026-01-01T00:00:02 'notepad.exe readme.txt' ;;
+esac
+STUBEOF
+chmod +x "$STUB/codex" "$STUB/npm" "$STUB/powershell"
+export T33_LOG="$STUBLOG"
+CR="$REPO/scripts/codex-refresh.sh"
+# Safety: the non-dry-run cases below would kill REAL processes if the stubs
+# were not resolved first. Refuse to run them unless all three resolve to stubs.
+t33_stubbed() {
+  local c
+  for c in codex npm powershell; do
+    [ "$(PATH="$STUB:$PATH" command -v "$c")" = "$STUB/$c" ] || return 1
+  done
+}
+
+if t33_stubbed; then
+H="$SANDBOX/t33a"; mkdir -p "$H"
+out="$(HOME="$H" PATH="$STUB:$PATH" bash "$REPO/install.sh" --refresh-codex 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'Codex routing is off' && ! printf '%s' "$out" | grep -q 'codex-refresh:' \
+  && [ ! -s "$STUBLOG" ] && [ ! -d "$H/.claude" ] \
+  && pass "T33a --refresh-codex with toggle OFF: skip line, exit 0, script not run" || fail "T33a toggle-off gating: rc=$rc '$out'"
+
+H="$SANDBOX/t33b"; mkdir -p "$H/.claude"; touch "$H/.claude/codex-routing.on"; : > "$STUBLOG"
+out="$(HOME="$H" PATH="$STUB:$PATH" bash "$REPO/install.sh" --refresh-codex 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'codex-refresh: version: installed 1.2.3 is current' \
+  && printf '%s' "$out" | grep -q 'codex-refresh: broker: PID 4242' \
+  && pass "T33b --refresh-codex with toggle ON runs the script, exit 0" || fail "T33b toggle-on run: rc=$rc '$out'"
+
+: > "$STUBLOG"
+out="$(PATH="$STUB:$PATH" bash "$CR" --dry-run 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PID 4242 .*dry-run, not killed' \
+  && ! printf '%s' "$out" | grep -q 'PID 4343' && ! printf '%s' "$out" | grep -q 'PID 5555' \
+  && ! grep -q 'KILL' "$STUBLOG" \
+  && pass "T33c --dry-run lists the broker, skips excluded/unrelated, kills nothing" || fail "T33c dry-run: rc=$rc '$out' log='$(cat "$STUBLOG")'"
+
+: > "$STUBLOG"
+out="$(PATH="$STUB:$PATH" bash "$CR" 2>&1)"
+grep -q 'KILL.*Stop-Process -Id 4242 ' "$STUBLOG" && ! grep -qE 'Id (4343|5555) ' "$STUBLOG" \
+  && pass "T33d live run kills the broker only (pmbot\bot excluded by default)" || fail "T33d kill scope: log='$(cat "$STUBLOG")'"
+
+: > "$STUBLOG"
+out="$(CODEX_REFRESH_EXCLUDE='openai-codex' PATH="$STUB:$PATH" bash "$CR" --dry-run 2>&1)"
+printf '%s' "$out" | grep -q 'PID 4343' && ! printf '%s' "$out" | grep -q 'PID 4242' \
+  && pass "T33e CODEX_REFRESH_EXCLUDE overrides the exclusion" || fail "T33e exclude override: '$out'"
+
+: > "$STUBLOG"
+out="$(T33_REJECT=gpt-bad PATH="$STUB:$PATH" bash "$CR" --dry-run --probe gpt-good,gpt-bad 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qx 'ACCEPTED gpt-good' \
+  && printf '%s' "$out" | grep -q '^REJECTED gpt-bad: .*not supported' \
+  && pass "T33f --probe: rejected ID prints REJECTED and exits non-zero" || fail "T33f probe: rc=$rc '$out'"
+
+out="$(PATH="$STUB:$PATH" bash "$CR" --dry-run --probe gpt-good 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qx 'ACCEPTED gpt-good' \
+  && pass "T33g --probe: all accepted exits 0" || fail "T33g probe all-accepted: rc=$rc '$out'"
+else
+  skip "T33a-g (codex/npm/powershell stubs do not shadow real binaries on PATH)"
+fi
+
+out="$(PATH="/usr/bin:/bin" bash -c 'command -v codex >/dev/null 2>&1 && echo HAS_CODEX || bash "$0"' "$CR" 2>&1)"; rc=$?
+if printf '%s' "$out" | grep -q HAS_CODEX; then
+  skip "T33h (a real codex is on /usr/bin:/bin; cannot simulate absence)"
+else
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'codex CLI not installed' \
+    && pass "T33h codex absent: says so, exits 0" || fail "T33h codex-absent: rc=$rc '$out'"
+fi
+
+H="$SANDBOX/t33i"; mkdir -p "$H"; run "$H"
+if [ -x "$H/.claude/scripts/codex-refresh.sh" ] && cmp -s "$CR" "$H/.claude/scripts/codex-refresh.sh"; then
+  cp "$H/.claude/scripts/codex-refresh.sh" "$SANDBOX/t33i.before"; run "$H"
+  cmp -s "$SANDBOX/t33i.before" "$H/.claude/scripts/codex-refresh.sh" \
+    && pass "T33i installer copies codex-refresh.sh to ~/.claude/scripts, idempotent" || fail "T33i script changed on re-run"
+else
+  fail "T33i script not installed to $H/.claude/scripts"
+fi
+
+H="$SANDBOX/t33j"; mkdir -p "$H"
+out="$(HOME="$H" bash "$REPO/install.sh" 2>&1)"
+printf '%s' "$out" | grep -q 'install.sh --refresh-codex' && fail "T33j reminder shown with toggle OFF" || {
+  touch "$H/.claude/codex-routing.on"
+  HOME="$H" bash "$REPO/install.sh" 2>&1 | grep -q 'install.sh --refresh-codex' \
+    && pass "T33j end-of-install --refresh-codex reminder only when toggle ON" || fail "T33j reminder missing with toggle ON"; }
+
 echo ""
 echo "=== RESULTS: $P passed, $F failed, $S skipped ==="
 [ "$F" -eq 0 ]

@@ -93,6 +93,22 @@ skip this step entirely. Codex findings feed a SEPARATE part of the Step 5
 diff: updates to the Codex section of `routing-rules.md` and the README table
 only. All rule-6 restrictions apply.
 
+**Mandatory live probe — BEFORE building the diff.** Run
+`~/.claude/scripts/codex-refresh.sh --probe <id1>,<id2>,...` with EVERY Codex
+model ID you intend to propose (it also restarts the plugin's resident broker,
+which otherwise keeps using the CLI version it was spawned with). Adopt ONLY
+IDs printed as `ACCEPTED <id>`. For each `REJECTED <id>: <error>`, record the
+exact error line in the Step 5 report and leave that ID out of the diff. Do
+NOT attribute a rejection to the user's account, plan, or entitlement unless a
+fetched official OpenAI doc states that restriction — otherwise write
+"unverified cause". If the script is missing, run `./install.sh` first; if
+`codex` is not installed, no Codex ID can be verified — propose no Codex ID
+changes.
+
+**Effort ceiling:** write `xhigh` as the maximum Codex reasoning effort
+anywhere in the table — the Codex CLI rejects `max` (`Unsupported reasoning
+effort "max"`), even if a docs page lists it.
+
 ### Step 3 — Map findings onto the harness roles
 The harness has five routing slots. Decide the best CURRENT model for each,
 justified by the fetched data:
@@ -149,3 +165,6 @@ Only after explicit approval:
 - **Research contradicts itself across sources:** prefer the `claude-api` skill,
   then the pricing/models docs over news; if still unresolved, abort.
 - **User declines at the gate:** zero edits, stop.
+- **Codex probe rejects an ID (Step 2b):** drop that ID, quote the exact error,
+  label the cause "unverified" unless a fetched official doc states it; never
+  propose effort `max` (CLI ceiling is `xhigh`).

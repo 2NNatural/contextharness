@@ -16,6 +16,9 @@ SETTINGS_FILE="${CLAUDE_DIR}/settings.json"
 HOOK_NEEDLE='context-meter.sh'
 GUARD_NEEDLE='destructive-guard.sh'
 TEMPLATES_SRC="${REPO_DIR}/templates"
+SCRIPTS_DIR="${CLAUDE_DIR}/scripts"
+CODEX_REFRESH_SRC="${REPO_DIR}/scripts/codex-refresh.sh"
+CODEX_TOGGLE="${CLAUDE_DIR}/codex-routing.on"
 START_MARKER='<!-- model-harness:start -->'
 END_MARKER='<!-- model-harness:end -->'
 
@@ -76,6 +79,7 @@ REMOVE_CONTEXT_HOOK=0
 WITH_GUARD=0
 REMOVE_GUARD=0
 INIT_INVENTORY=0
+REFRESH_CODEX=0
 OTHER_FLAGS=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -98,6 +102,7 @@ while [ $# -gt 0 ]; do
     --with-destructive-guard)  WITH_GUARD=1;   OTHER_FLAGS=1; shift ;;
     --remove-destructive-guard) REMOVE_GUARD=1; OTHER_FLAGS=1; shift ;;
     --init-inventory)          INIT_INVENTORY=1; shift ;;
+    --refresh-codex)           REFRESH_CODEX=1; shift ;;
     *)
       echo "error: unknown argument: $1" >&2
       exit 1
@@ -135,6 +140,24 @@ if [ "${INIT_INVENTORY}" -eq 1 ]; then
   echo "Fill in one row per cross-process/cross-service link, then keep the"
   echo "'last verified live' column current. /audit reads this file."
   exit 0
+fi
+
+# --- --refresh-codex: standalone Codex CLI + plugin-broker refresh -----------
+# Runs the repo copy of scripts/codex-refresh.sh --update, but ONLY when the
+# Codex toggle is on. Writes nothing itself; exits before any install work.
+if [ "${REFRESH_CODEX}" -eq 1 ]; then
+  if [ "${OTHER_FLAGS}" -eq 1 ] || [ "${INIT_INVENTORY}" -eq 1 ]; then
+    echo "error: --refresh-codex must be used alone" >&2
+    exit 1
+  fi
+  if [ ! -e "${CODEX_TOGGLE}" ]; then
+    echo "Codex routing is off (${CODEX_TOGGLE} absent) — skipping Codex refresh."
+    exit 0
+  fi
+  [ -f "${CODEX_REFRESH_SRC}" ] \
+    || { echo "error: ${CODEX_REFRESH_SRC} not found" >&2; exit 1; }
+  bash "${CODEX_REFRESH_SRC}" --update
+  exit $?
 fi
 
 # Validate flag value if provided
@@ -210,6 +233,14 @@ if [ -d "${SKILLS_SRC}" ]; then
     cp "$d"*.md "${SKILLS_DIR}/${name}/"
     echo "installed skill: ${SKILLS_DIR}/${name}"
   done
+fi
+
+# 1b2. Install helper scripts (repo is source of truth — overwrite).
+if [ -f "${CODEX_REFRESH_SRC}" ]; then
+  mkdir -p "${SCRIPTS_DIR}"
+  cp "${CODEX_REFRESH_SRC}" "${SCRIPTS_DIR}/codex-refresh.sh"
+  chmod +x "${SCRIPTS_DIR}/codex-refresh.sh"
+  echo "installed script: ${SCRIPTS_DIR}/codex-refresh.sh"
 fi
 
 # 1c. Optional context-meter hook (opt-in; default install never touches settings.json).
@@ -448,4 +479,8 @@ Done. Next steps:
   6. Optional destructive guard: ./install.sh --with-destructive-guard
   7. Start an interface inventory in a project: cd <project> && <path-to-harness>/install.sh --init-inventory
 EOF
+fi
+
+if [ -e "${CODEX_TOGGLE}" ]; then
+  echo "Codex routing is ON: after any Codex CLI update run ./install.sh --refresh-codex (restarts the plugin's resident broker, which pins the old CLI)."
 fi

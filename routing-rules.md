@@ -39,14 +39,14 @@ The OpenAI Codex plugin (`/codex:*` commands, `codex:codex-rescue` subagent) is 
 
 **Codex OFF (default — fresh installs and anyone without the plugin):** never auto-invoke any `/codex:*` command or `codex:codex-rescue`. Do not route to them or present them as an automatic step — they run only when the user types the command by name. You may *remind* the user they exist, but wait for the literal command.
 
-**Codex ON:** you MAY route the READ-ONLY, cross-vendor second opinions below automatically — always *alongside*, never *instead of*, the Claude ladder. Route only when a change/plan is genuinely risky or consequential (the same bar that warrants `architect`), not routinely. Pick the GPT-5.6 tier per task (IDs re-verified 2026-07-24; user-maintained in `.codex/config.toml`, may drift):
+**Codex ON:** you MAY route the READ-ONLY, cross-vendor second opinions below automatically — always *alongside*, never *instead of*, the Claude ladder. Route only when a change/plan is genuinely risky or consequential (the same bar that warrants `architect`), not routinely. If any Codex call fails with "model is not supported" or "requires a newer version", first run `~/.claude/scripts/codex-refresh.sh` (restarts the plugin's resident broker, which pins the CLI version it was spawned with) and retry once; test the CLI directly with `codex exec --model <id>` before concluding anything about the account, and never state an entitlement/plan limit as fact without a fetched official doc. Pick the tier per task (IDs re-verified 2026-10-12 against developers.openai.com/api/docs/models and /api/docs/pricing; `gpt-6-astra` verified live 2026-09-06 on Codex CLI ≥ 0.153.4 (older CLIs reject it with "requires a newer version of Codex" — upgrade with `npm install -g @openai/codex@latest`); if an Astra call fails, retry once on `gpt-6.1-sol` at the same effort and say so; profiles `review`/`security`/`judgment` in `~/.codex/*.config.toml` match this table; user-maintained in `.codex/config.toml`, may drift):
 
 | Task | Tier | Effort | Confirm with user first? |
 |---|---|---|---|
-| Adversarial review of a risky change (supplements `architect`) | `gpt-5.6-terra` | medium | no |
-| Second opinion on a high-stakes `architect` plan before `executor` builds | `gpt-5.6-terra` | medium | no |
-| Security / vulnerability audit of a module or repo area | `gpt-5.6-sol` | high | yes — priciest tier |
-| High-level judgment audit — subjective design or mechanism flaws in code that may be functionally correct: math repositories, prediction-market/execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits | `gpt-5.6-sol` | xhigh | yes — priciest tier |
+| Adversarial review of a risky change (supplements `architect`) | `gpt-6-luna` | xhigh | no |
+| Second opinion on a high-stakes `architect` plan before `executor` builds | `gpt-6-luna` | xhigh | no |
+| Security / vulnerability audit of a module or repo area | `gpt-6-astra` | high | yes — priciest tier |
+| High-level judgment audit — subjective design or mechanism flaws in code that may be functionally correct: math repositories, prediction-market/execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits | `gpt-6-astra` | xhigh | yes — priciest tier |
 
 **Forbidden even when ON:** cross-vendor *writes* — `/codex:rescue` and `codex:codex-rescue`-as-fixer stay user-initiated by name (all writes flow through `executor`; Claude leads real-issue resolution). Never route executor-class implementation, or routine search / log-digest (haiku `scout` is cheaper and native), to Codex. Codex is never part of the scout → architect → oracle ladder — it is an optional *parallel* read-only opinion.
 
