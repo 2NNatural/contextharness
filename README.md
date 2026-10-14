@@ -221,6 +221,10 @@ Idempotent and safe to run anytime (a Codex call in flight at that moment is int
 
 This deliberately spreads some review/audit load off your Anthropic quota onto your Codex subscription. The `routing-refresh` skill keeps the Codex tier IDs in this table fresh too — but only when the toggle file exists, and always under the same diff-then-confirm gate; your `.codex/config.toml` itself is never touched.
 
+### Routing refresh: benchmark-and-price selection
+
+The `routing-refresh` skill chooses models by measured performance and price, not by what a provider says a model is for. For every current Claude model (and, with the Codex toggle on, every Codex-accepted GPT model) it fetches scores from independent boards: Artificial Analysis (Intelligence Index, Coding Index, blended price, speed), LMArena (overall, coding, WebDev Elo), SWE-bench Verified, Aider polyglot, LiveBench, and Terminal-Bench. A model needs scores from at least two boards to count; unrated models are never routed to by tier name, and boards older than 60 days are flagged stale. For each task class it computes the price/performance Pareto frontier (a model is dominated if another scores at least as high and costs no more) and picks from the frontier by a stated tolerance: scout = cheapest point at 70% or more of the frontier max; executor = best score within 10 points of the max; architect = frontier max unless a point within 3 points is cheaper; oracle = frontier max on score and context regardless of price; Codex review = cheapest point within 5 points; Codex audits = frontier max. The diff prints the full frontier table per task. If a benchmark-chosen model differs from what a bare alias resolves to, the skill reports it and proposes pinning the full ID in the routing table; agent files are never edited. Nothing is applied without confirmation.
+
 ## Files
 
 | File | Purpose |
@@ -233,7 +237,7 @@ This deliberately spreads some review/audit load off your Anthropic quota onto y
 | `install.sh` | idempotent user-level installer |
 | `hooks/context-meter.sh` | UserPromptSubmit hook — injects `[context: ~N%]` at 70/80/90% band crossings from real transcript usage |
 | `hooks/destructive-guard.sh` | PreToolUse/Bash hook — opt-in tripwire blocking destructive commands whose target resolves outside a scratchpad/temp dir |
-| `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + diff-then-confirm |
+| `skills/routing-refresh/SKILL.md` | on-demand "refresh the routing policy" skill — live model research + independent-benchmark/price Pareto selection + diff-then-confirm |
 | `skills/audit/SKILL.md` | on-demand `/audit` skill — runs the Audit Standard against a target and gates the verdict |
 | `templates/INTERFACES.md` | interface-inventory template, installed into a project via `--init-inventory` |
 | `scripts/codex-refresh.sh` | Codex CLI version check/update + kills the plugin's stale resident broker + `--probe` model IDs; installed to `~/.claude/scripts/`, run via `./install.sh --refresh-codex` (toggle-gated) |

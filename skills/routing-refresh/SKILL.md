@@ -15,7 +15,12 @@ re-run the installer.
 1. **Live sources only — never use model knowledge from memory.** Every model
    ID, price, and context-window number you cite MUST come from a page you
    fetched in THIS session via WebSearch/WebFetch (or the `claude-api` skill).
-   If you did not fetch it this session, you do not know it.
+   If you did not fetch it this session, you do not know it. **Performance
+   claims must come from an independent benchmark board fetched this session
+   (Step 2c).** Provider positioning language ("most capable", "most
+   efficient", "for focused tasks", tier names like haiku/sonnet/opus/luna/sol/
+   astra) is explicitly NOT a basis for routing; vendor model cards and blogs
+   are not performance evidence (vendor pricing pages are fine for prices).
 2. **Never invent or guess a model ID.** Model IDs (e.g. `claude-opus-4-5`,
    `claude-fable-5`) must be copied verbatim from fetched official content. If
    you cannot find an exact ID in a fetched source, treat it as unknown and do
@@ -109,18 +114,71 @@ changes.
 anywhere in the table — the Codex CLI rejects `max` (`Unsupported reasoning
 effort "max"`), even if a docs page lists it.
 
-### Step 3 — Map findings onto the harness roles
-The harness has five routing slots. Decide the best CURRENT model for each,
-justified by the fetched data:
-- **scout** → cheapest fast tier (currently the haiku line). Bare alias — DO
-  NOT edit the agent file; only reflect the alias name in the routing table if
-  the alias itself changed.
-- **executor** → mid tier (currently the sonnet line). Bare alias — same rule.
-- **architect** → strong reasoner (currently the opus line). Bare alias — same rule.
-- **oracle / orchestrator top model** → strongest + largest context. THIS is
-  the only role with a pinned full model ID, in `agents/oracle.md`. Choose
-  fable vs opus base per the Step 1 tier detection, using the verbatim ID from
-  Step 2.
+### Step 2c — Independent benchmarks (mandatory)
+Via the same cheap-subagent delegation (rule 7), for EVERY candidate model —
+all current Claude models from Step 2 and, if the Codex toggle is on, all
+Codex-ACCEPTED GPT models from Step 2b — fetch scores from INDEPENDENT boards:
+- Artificial Analysis: Intelligence Index, Coding Index, blended $/M price,
+  output speed,
+- LMArena: overall, coding, and WebDev Elo,
+- SWE-bench Verified,
+- Aider polyglot,
+- LiveBench,
+- Terminal-Bench.
+The subagent returns ONLY a compact table: model, board, score, board
+last-updated date, source URL. Rules:
+- A model counts as **rated** only with scores from at LEAST TWO independent
+  boards. A model absent from all boards is **unrated**: never route to it by
+  tier name alone.
+- Vendor model cards/blogs are NOT performance evidence. Prices may come from
+  vendor pricing pages or Artificial Analysis.
+- Record each board's last-updated date; a board older than 60 days is flagged
+  **stale** in the report.
+- If fewer than two boards can be fetched for the top-model decision, abort per
+  rule 5 (no edits).
+
+### Step 3 — Map findings onto the harness roles (Pareto frontier per task)
+The harness has five routing slots plus the Codex task rows. Choose each by
+measuring the price/performance Pareto frontier of the rated models for that
+task class, never by tier name. Apply this procedure ONCE per task class
+(search/summarize, implementation, hard reasoning/review, oracle, and each
+Codex task row):
+1. **Benchmark axis.** Name the board, or a stated average of 2+ boards,
+   relevant to the task. Defaults: implementation = mean of SWE-bench Verified
+   + Aider polyglot; search/summarize = Artificial Analysis Intelligence Index
+   (output speed as tiebreak); reasoning/review = mean of Coding Index +
+   LMArena coding. State the axis used.
+2. **Price axis.** Blended $/M from Artificial Analysis, or (input + 3 x
+   output)/4 from vendor pricing. State which.
+3. **Frontier.** A model is dominated if another model scores >= it AND costs
+   <= it, strictly better on at least one. List the non-dominated set in order
+   of price.
+4. **Pick from the frontier by the task's price tolerance:**
+   - **scout** (search/summarize, high volume) = cheapest frontier point whose
+     score >= 70% of the frontier max.
+   - **executor** (implementation) = the frontier point with the best score
+     within 10 points of the frontier max, cheapest among ties.
+   - **architect** (hard reasoning, read-only) = frontier max, unless a
+     frontier point within 3 points of it is cheaper, then that one.
+   - **oracle / orchestrator top model** = frontier max on score (and largest
+     context) regardless of price. THIS is the only role with a pinned full
+     model ID, in `agents/oracle.md`. Keep the fable/opus tier detection from
+     Step 1 and use the verbatim ID from Step 2.
+   - **Codex review / second opinion (toggle on)** = cheapest frontier point
+     within 5 points of the frontier max on the review axis.
+   - **Codex security / judgment audits (toggle on)** = frontier max
+     (operator-confirmed). Effort ceiling `xhigh`.
+5. **Print the frontier table per task** in the Step 5 diff (see there).
+Consider only rated models.
+
+**Alias drift check.** scout/executor/architect stay bare aliases in the agent
+files (rule 4 forbids editing them). For each, probe the alias with
+`claude -p --model <alias> --output-format json` and read `modelUsage` to learn
+which full model ID it currently resolves to. If the frontier-chosen model
+differs, REPORT it, propose pinning the full model ID in the routing table's
+`Model` column, and flag it for the user — the table may diverge from the alias
+when the numbers say so. The agent files remain untouched.
+
 Note which slots actually changed. If nothing changed, report "policy already
 current" and stop (no diff, no edits).
 
@@ -143,7 +201,12 @@ For each in-scope file, construct the exact new content:
 Present a clear before/after for every file you intend to change:
 - a unified-style diff or an explicit "OLD → NEW" per line,
 - a one-line rationale per change citing the fetched source URL,
-- the detected tier and how it was detected.
+- the detected tier and how it was detected,
+- **per task**: the full frontier table (ALL rated candidates, benchmark-axis
+  score, price, dominated-by or "frontier") so the operator can see the curve;
+  then the chosen model, the runner-up, the two+ boards, scores and price that
+  decided it, and the per-$ figure; plus stale-board flags and alias-drift
+  findings. A choice with no benchmark behind it is NOT allowed in the diff.
 Then ask: "Apply these changes? (yes/no)".
 - Do NOT edit any file until the user explicitly approves.
 - If the user says no or anything ambiguous, make zero changes and stop.
@@ -160,6 +223,9 @@ Only after explicit approval:
 - **No network / fetch fails:** abort per rule 5; no edits.
 - **Found a model name but no exact ID:** treat ID as unknown; do not write it;
   if it blocks the top-model decision, abort.
+- **Boards unreachable or stale (Step 2c):** report, no edits.
+- **Model absent from all boards:** treat as unrated; never route to it by tier
+  name alone.
 - **Probe can't run:** assume fable, say so, continue (research is independent
   of the probe).
 - **Research contradicts itself across sources:** prefer the `claude-api` skill,
