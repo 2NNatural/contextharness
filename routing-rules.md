@@ -44,7 +44,7 @@ The OpenAI Codex plugin (`/codex:*` commands, `codex:codex-rescue` subagent) is 
 | Task | Tier | Effort | Confirm with user first? |
 |---|---|---|---|
 | Adversarial review of a risky change (supplements `architect`) | `gpt-6-luna` | xhigh | no |
-| Second opinion on a high-stakes `architect` plan before `executor` builds | `gpt-6-luna` | xhigh | no |
+| Second opinion on a high-stakes `architect` plan before `executor` builds | `gpt-6.1-sol` | high | no |
 | Security / vulnerability audit of a module or repo area | `gpt-6-astra` | high | yes — priciest tier |
 | High-level judgment audit — subjective design or mechanism flaws in code that may be functionally correct: math repositories, prediction-market/execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits | `gpt-6-astra` | xhigh | yes — priciest tier |
 

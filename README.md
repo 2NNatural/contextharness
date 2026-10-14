@@ -194,7 +194,7 @@ The file survives `./install.sh` re-runs, so `git pull && ./install.sh` never fl
   | Task | Tier | Effort | Notes |
   |---|---|---|---|
   | Adversarial review of a risky change (supplements `architect`) | `gpt-6-luna` | xhigh | cheap cross-vendor diversity ($0.10/$0.50 per MTok at xhigh effort) |
-  | Second opinion on a high-stakes `architect` plan | `gpt-6-luna` | xhigh | high-stakes plans only |
+  | Second opinion on a high-stakes `architect` plan | `gpt-6.1-sol` | high | high-stakes plans only |
   | Security / vulnerability audit of a module or area | `gpt-6-astra` | high | orchestrator confirms with you first (priciest tier) |
   | High-level judgment audit — subjective design/mechanism flaws in functionally-correct code (math repos, prediction-market execution mechanisms, formal-verification parameters, algorithm & data-model design, efficiency and data audits) | `gpt-6-astra` | xhigh | orchestrator confirms with you first (priciest tier) |
 
