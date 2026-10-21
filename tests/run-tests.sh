@@ -491,6 +491,22 @@ else
     && pass "T33h codex absent: says so, exits 0" || fail "T33h codex-absent: rc=$rc '$out'"
 fi
 
+# T33k two codex binaries on PATH: both listed with versions, first wins, WARNING printed
+D1="$SANDBOX/t33j1"; D2="$SANDBOX/t33j2"; mkdir -p "$D1" "$D2"
+printf '#!/usr/bin/env bash
+echo "codex-cli 0.153.4"
+' > "$D1/codex"
+printf '#!/usr/bin/env bash
+echo "codex-cli 0.163.0"
+' > "$D2/codex"
+chmod +x "$D1/codex" "$D2/codex"
+if [ "$(PATH="$D1:$D2:$STUB:$PATH" command -v codex)" = "$D1/codex" ]; then
+  out="$(PATH="$D1:$D2:$STUB:$PATH" bash "$CR" --dry-run 2>&1)"
+  printf '%s' "$out" | grep -q "binary: $D1/codex 0.153.4 <- WINS"     && printf '%s' "$out" | grep -q "binary: $D2/codex 0.163.0$"     && printf '%s' "$out" | grep -q 'WARNING: multiple codex binaries on PATH'     && pass "T33k multiple codex on PATH: both listed, first wins, WARNING" || fail "T33k multi-binary: '$out'"
+else
+  skip "T33k (stub dirs do not shadow PATH)"
+fi
+
 H="$SANDBOX/t33i"; mkdir -p "$H"; run "$H"
 if [ -x "$H/.claude/scripts/codex-refresh.sh" ] && cmp -s "$CR" "$H/.claude/scripts/codex-refresh.sh"; then
   cp "$H/.claude/scripts/codex-refresh.sh" "$SANDBOX/t33i.before"; run "$H"

@@ -12,6 +12,7 @@
 #
 # Steps (each logged on one line):
 #   (a) codex not on PATH -> say so, exit 0
+#   (b0) warn if several distinct codex binaries are on PATH (first one wins)
 #   (b) compare `codex --version` to `npm view @openai/codex version`;
 #       install the update only with --update
 #   (c) ALWAYS kill stale broker processes (--dry-run lists only)
@@ -74,6 +75,41 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 0
 fi
 
+# --- (b0) multiple codex binaries on PATH? ----------------------------------
+# The plugin broker spawns the FIRST `codex` on PATH. A second install (e.g. a
+# native one ahead of npm's) makes `npm install -g` "succeed" while the broker
+# keeps using the old binary.
+cands="$(type -ap codex 2>/dev/null | tr -d '')"
+if command -v where >/dev/null 2>&1; then
+  w="$(where codex 2>/dev/null | tr -d '')"
+  if [ -n "${w}" ]; then
+    command -v cygpath >/dev/null 2>&1 && w="$(printf '%s
+' "${w}" | while IFS= read -r l; do cygpath -u "$l" 2>/dev/null || printf '%s
+' "$l"; done)"
+    cands="$(printf '%s
+%s
+' "${cands}" "${w}")"
+  fi
+fi
+# Distinct binaries = distinct directories (codex, codex.cmd, codex.ps1 share one).
+seen_dirs=""; bins=()
+while IFS= read -r c; do
+  [ -n "${c}" ] || continue
+  d="$(dirname "${c}")"
+  case "${seen_dirs}" in *"|${d}|"*) continue ;; esac
+  seen_dirs="${seen_dirs}|${d}|"; bins+=("${c}")
+done <<< "${cands}"
+if [ "${#bins[@]}" -gt 1 ]; then
+  i=0
+  for c in "${bins[@]}"; do
+    v="$(with_timeout 30 "${c}" --version 2>/dev/null | tr -d '' | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)"
+    if [ "${i}" -eq 0 ]; then log "binary: ${c} ${v:-unknown} <- WINS (first on PATH)"
+    else log "binary: ${c} ${v:-unknown}"; fi
+    i=$((i+1))
+  done
+  log "WARNING: multiple codex binaries on PATH; the plugin broker uses the FIRST one — disable or reorder the others (rename its bin dir or edit the user PATH)"
+fi
+
 # --- (b) version check / optional update -------------------------------------
 installed="$(with_timeout 30 codex --version 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)"
 if ! command -v npm >/dev/null 2>&1; then
@@ -92,6 +128,9 @@ else
     if with_timeout 600 npm install -g @openai/codex@latest >/dev/null 2>&1; then
       now="$(with_timeout 30 codex --version 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)"
       log "version: update done, codex now ${now:-unknown}"
+      if [ "${now}" = "${installed}" ]; then
+        log "WARNING: version UNCHANGED after update (${now:-unknown}) — the updated binary is NOT the one on PATH (another codex install shadows it; see binaries above)"
+      fi
     else
       log "version: npm install FAILED (re-run by hand: npm install -g @openai/codex@latest)"
     fi

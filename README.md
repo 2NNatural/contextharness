@@ -215,6 +215,8 @@ The Codex plugin keeps a **resident broker** process (`node .../openai-codex/cod
 3. **always** kills stale broker processes — any process whose command line matches `app-server-broker|codex.*app-server` and does NOT match the exclusion regex `CODEX_REFRESH_EXCLUDE` (default `pmbot\\bot`) — printing each PID and start time; `--dry-run` lists without killing. Uses PowerShell on Windows, `pgrep`/`kill` elsewhere. The plugin respawns the broker on its next call;
 4. `--probe` runs `codex exec --model <id> --skip-git-repo-check -c model_reasoning_effort=low "Reply with exactly: OK"` per ID (120 s timeout) and prints `ACCEPTED <id>` or `REJECTED <id>: <first error line>`; exits non-zero if any ID is rejected.
 
+If more than one distinct `codex` binary is on PATH it lists each with its `--version`, marks the first (the one the broker spawns) and prints a `WARNING`; after `--update`, an unchanged version is flagged as "the updated binary is not the one on PATH".
+
 Idempotent and safe to run anytime (a Codex call in flight at that moment is interrupted). Never prints tokens or keys. With the toggle on, `./install.sh` ends with a one-line reminder of `--refresh-codex`. Codex's reasoning-effort ceiling on the CLI is `xhigh` — it rejects `max`.
 
 **Manual commands (any time, regardless of toggle):** `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`, `/codex:cancel`.
