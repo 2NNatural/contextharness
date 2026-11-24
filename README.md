@@ -23,6 +23,7 @@ Start here: **[Operator guide](docs/OPERATOR-GUIDE.md)** (no engineering backgro
 | [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | What was studied (pstack, Poteto's methodology, Grok Bot, Claude Code, Codex) and the adopt/adapt/defer/reject decision for every capability |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | The evaluation suite and measured baseline-vs-upgrade results |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What it does not do, and what to build next |
+| [docs/REPORT.md](docs/REPORT.md) | Implementation report: what is implemented, tested, verified, and not |
 | [CHANGELOG.md](CHANGELOG.md) | Every meaningful change from v1, and migration steps |
 | [CONTEXT.md](CONTEXT.md) · [PROGRESS.md](PROGRESS.md) · [ROADMAP.md](ROADMAP.md) | This repo's own session memory, history and what's-next |
 

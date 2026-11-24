@@ -4,7 +4,7 @@
 # bench/run.sh produced; it reports what was measured and nothing else.
 set -u
 OUT="${1:-${TMPDIR:-/tmp}/harness-bench}"
-files="$(ls "${OUT}"/*/results.json 2>/dev/null)"
+files="$(ls "${OUT}"/*/results.json "${OUT}"/*.json 2>/dev/null)"
 [ -n "${files}" ] || { echo "no results under ${OUT}" >&2; exit 1; }
 # shellcheck disable=SC2086
 all="$(jq -s 'add' ${files})"
