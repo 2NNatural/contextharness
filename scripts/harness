@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# harness — one small CLI for the deterministic parts of ContextHarness.
+#   harness detect [dir]              what kind of project is this and how is it tested/run (JSON)
+#   harness trust-verify [dir]        trust the project's .claude/harness/verify.sh (records its hash)
+#   harness status [dir]              verify-recipe trust state for a project
+#   harness stats [--days N]          real token use per model from session transcripts
+#   harness lessons add|list|propose  the lesson ledger behind the `learn` skill
+#   harness codex-review <class> ...  read-only cross-vendor review via `codex exec` (toggle-gated)
+#   harness undo [session-id]         show how to restore the checkpoint taken at session start
+#   harness doctor                    is everything installed and live?
+#   harness off | on                  kill switch for all workflow hooks
+set -u
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+H_DIR="${CLAUDE_DIR}/harness"
+H_CWD="${PWD}"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="${SELF_DIR}/harness-lib.sh"
+[ -f "${LIB}" ] || LIB="${SELF_DIR}/../hooks/harness-lib.sh"
+# shellcheck disable=SC1090
+. "${LIB}" 2>/dev/null || { echo "harness: cannot load ${LIB} — run ./install.sh" >&2; exit 1; }
+need_jq() { command -v jq >/dev/null 2>&1 || { echo "harness: jq is required for this command" >&2; exit 1; }; }
+
+cmd_detect() {
+  need_jq
+  local d="${1:-.}"; cd "${d}" 2>/dev/null || { echo "harness: no such directory: ${d}" >&2; exit 1; }
+  H_CWD="${PWD}"; local root; root="$(h_root)"; cd "${root}" || exit 1
+  local types=() test=() build=() run=() kinds=() risk=()
+  add() { local -n arr="$1"; arr+=("$2"); }
+  if [ -f package.json ]; then
+    types+=(node)
+    local pm=npm; [ -f pnpm-lock.yaml ] && pm=pnpm; [ -f yarn.lock ] && pm=yarn; { [ -f bun.lockb ] || [ -f bun.lock ]; } && pm=bun
+    local s
+    for s in test test:unit test:e2e e2e typecheck lint build start dev; do
+      if jq -e --arg s "$s" '.scripts[$s] // empty' package.json >/dev/null 2>&1; then
+        case "$s" in
+          test*|e2e|typecheck|lint) jq -e --arg s "$s" '.scripts[$s]|test("no test specified")' package.json >/dev/null 2>&1 || test+=("${pm} run ${s}") ;;
+          build) build+=("${pm} run build") ;;
+          start|dev) run+=("${pm} run ${s}") ;;
+        esac
+      fi
+    done
+    jq -e '(.dependencies // {}) + (.devDependencies // {}) | keys | any(test("^(react|vue|svelte|next|nuxt|@angular/core|astro|solid-js|vite)$"))' package.json >/dev/null 2>&1 && kinds+=(web-ui)
+    jq -e '(.dependencies // {}) | keys | any(test("^(express|fastify|koa|hono|@nestjs/core)$"))' package.json >/dev/null 2>&1 && kinds+=(api)
+    jq -e '(.dependencies // {}) + (.devDependencies // {}) | keys | any(test("^(@playwright/test|playwright|cypress|puppeteer)$"))' package.json >/dev/null 2>&1 && kinds+=(has-browser-tests)
+    jq -e '.bin // empty' package.json >/dev/null 2>&1 && kinds+=(cli)
+  fi
+  if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ] || ls ./*.py >/dev/null 2>&1; then
+    types+=(python)
+    if [ -f pytest.ini ] || [ -d tests ] || grep -qs pytest pyproject.toml requirements*.txt setup.cfg tox.ini 2>/dev/null || [ -n "$(compgen -G "test_*.py")$(compgen -G "*_test.py")" ]; then
+      if python3 -c 'import pytest' 2>/dev/null; then test+=("python3 -m pytest -q"); else test+=("python3 -m unittest discover -q"); fi
+    fi
+    grep -qsE '^(fastapi|flask|django|starlette|aiohttp)' requirements*.txt pyproject.toml 2>/dev/null && kinds+=(api)
+    grep -qsE '(pandas|polars|pyspark|dbt-core|airflow|duckdb)' requirements*.txt pyproject.toml 2>/dev/null && kinds+=(data)
+    [ -f manage.py ] && run+=("python3 manage.py runserver")
+  fi
+  [ -f Cargo.toml ] && { types+=(rust); test+=("cargo test"); build+=("cargo build"); }
+  [ -f go.mod ] && { types+=(go); test+=("go test ./..."); build+=("go build ./..."); }
+  { [ -f pom.xml ] && { types+=(java); test+=("mvn -q test"); }; } || true
+  { { [ -f build.gradle ] || [ -f build.gradle.kts ]; } && { types+=(jvm); test+=("./gradlew test"); }; } || true
+  [ -f Gemfile ] && { types+=(ruby); [ -d spec ] && test+=("bundle exec rspec"); }
+  [ -f composer.json ] && { types+=(php); [ -f phpunit.xml ] || [ -f phpunit.xml.dist ] && test+=("vendor/bin/phpunit"); }
+  ls ./*.sln ./*.csproj >/dev/null 2>&1 && { types+=(dotnet); test+=("dotnet test"); }
+  if [ -f Makefile ]; then
+    types+=(make); local t
+    for t in test check lint build; do grep -qE "^${t}:" Makefile && { case "$t" in build) build+=("make build") ;; *) test+=("make ${t}") ;; esac; }; done
+  fi
+  { [ -f Dockerfile ] || [ -f docker-compose.yml ] || [ -f compose.yaml ]; } && kinds+=(containerized)
+  ls ./*.tf >/dev/null 2>&1 && { types+=(terraform); kinds+=(infrastructure); risk+=(infrastructure); }
+  ls .github/workflows/*.y*ml >/dev/null 2>&1 && kinds+=(has-ci)
+  # Risk signals: names only, never file contents. These push the rigor mode up.
+  local names; names="$(git ls-files 2>/dev/null | head -5000)"; [ -n "${names}" ] || names="$(find . -maxdepth 4 -type f -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null | head -5000)"
+  printf '%s\n' "${names}" | grep -Eiq '(^|[/_.-])(payment|billing|invoice|ledger|wallet|trade|trading|order[_-]?book|settle|accounting|portfolio|pricing)' && risk+=(money)
+  printf '%s\n' "${names}" | grep -Eiq '(^|[/_.-])(auth|login|session|password|oauth|jwt|crypto|permission|acl|secret)' && risk+=(security)
+  printf '%s\n' "${names}" | grep -Eiq '(migrat|schema\.(sql|prisma)|alembic)' && risk+=(data-migration)
+  printf '%s\n' "${names}" | grep -Eiq '(deploy|\.tf$|k8s|helm|kubernetes|cloudformation)' && risk+=(deployment)
+  local recipe; recipe="$(h_recipe_status "${root}")"
+  j() { if [ $# -eq 0 ]; then echo '[]'; else printf '%s\n' "$@" | jq -R . | jq -sc 'unique'; fi; }
+  jq -n --arg root "${root}" --arg recipe "${recipe}" \
+    --argjson types "$(j "${types[@]:-}")" --argjson test "$(j "${test[@]:-}")" --argjson build "$(j "${build[@]:-}")" \
+    --argjson run "$(j "${run[@]:-}")" --argjson kinds "$(j "${kinds[@]:-}")" --argjson risk "$(j "${risk[@]:-}")" \
+    '{root:$root, types:($types-[""]), kinds:($kinds-[""]), test_commands:($test-[""]), build_commands:($build-[""]),
+      run_commands:($run-[""]), risk_signals:($risk-[""]), verify_recipe:$recipe,
+      suggested_mode:(if (($risk-[""])|length)>0 then "high-assurance candidate (confirm against the actual change)" else "by task size" end)}'
+}
+
+cmd_trust() {
+  local d="${1:-.}"; cd "${d}" 2>/dev/null || exit 1; H_CWD="${PWD}"
+  local root recipe key hash; root="$(h_root)"; recipe="${root}/.claude/harness/verify.sh"
+  [ -f "${recipe}" ] || { echo "harness: ${recipe} does not exist" >&2; exit 1; }
+  key="$(h_project_key)"; hash="$(h_filehash "${recipe}")"
+  mkdir -p "${H_DIR}"; touch "$(h_trust_file)"
+  if grep -qF "${hash}	${key}" "$(h_trust_file)"; then echo "already trusted: ${recipe}"; exit 0; fi
+  printf '%s\t%s\t%s\n' "${hash}" "${key}" "$(date '+%Y-%m-%dT%H:%M:%S')" >>"$(h_trust_file)"
+  echo "trusted: ${recipe} (sha256 ${hash:0:12}…). The stop-gate will now run it before work is reported done."
+}
+cmd_status() {
+  local d="${1:-.}"; cd "${d}" 2>/dev/null || exit 1; H_CWD="${PWD}"
+  local root; root="$(h_root)"; echo "project: ${root}"; echo "verify recipe: $(h_recipe_status "${root}")"
+}
+
+cmd_stats() {
+  need_jq
+  local days=7; [ "${1:-}" = "--days" ] && days="${2:-7}"
+  local files; files="$(find "${CLAUDE_DIR}/projects" -name '*.jsonl' -mtime "-${days}" 2>/dev/null)"
+  [ -n "${files}" ] || { echo "no session transcripts in the last ${days} day(s) under ${CLAUDE_DIR}/projects"; exit 0; }
+  echo "Token use by model, last ${days} day(s) (from session transcripts; subagent turns included):"
+  # shellcheck disable=SC2086
+  cat ${files} 2>/dev/null | jq -rc 'select(.type=="assistant" and .message.usage != null) | [(.message.id // .uuid), (.message.model // "unknown"), (.isSidechain == true),
+        (.message.usage.input_tokens // 0), (.message.usage.cache_creation_input_tokens // 0), (.message.usage.cache_read_input_tokens // 0), (.message.usage.output_tokens // 0)] | @tsv' 2>/dev/null \
+    | sort -u -k1,1 | awk -F'\t' '
+        { m=$2; n[m]++; if ($3=="true") sc[m]++; inp[m]+=$4; cw[m]+=$5; cr[m]+=$6; out[m]+=$7; tot+=$4+$5+$6+$7 }
+        END { printf "%-28s %8s %9s %12s %12s %12s %12s\n","model","turns","subagent","input","cache_write","cache_read","output";
+              for (m in n) printf "%-28s %8d %8d%% %12d %12d %12d %12d\n", m, n[m], (sc[m]*100/n[m]), inp[m], cw[m], cr[m], out[m];
+              printf "total tokens: %d\n", tot }'
+  echo "Prices change; multiply by the current price list rather than trusting a baked-in one."
+}
+
+cmd_lessons() {
+  need_jq
+  local sub="${1:-list}"; shift 2>/dev/null || true
+  local led="${H_DIR}/lessons.jsonl"; mkdir -p "${H_DIR}"; touch "${led}"
+  case "${sub}" in
+    add)   # harness lessons add <class-slug> <scope: project|global> <one-line description> [prevention]
+      [ $# -ge 3 ] || { echo "usage: harness lessons add <class-slug> <project|global> <description> [prevention]" >&2; exit 1; }
+      local key; H_CWD="${PWD}"; key="$(h_project_key)"
+      jq -cn --arg c "$1" --arg s "$2" --arg d "$3" --arg p "${4:-}" --arg k "${key}" --arg t "$(date '+%Y-%m-%d')" \
+        '{class:$c,scope:$s,desc:$d,prevention:$p,project:$k,date:$t}' >>"${led}"
+      local n; n="$(jq -rs --arg c "$1" '[.[]|select(.class==$c)]|length' "${led}")"
+      echo "recorded. '$1' has now been seen ${n} time(s)."
+      [ "${n}" -ge 2 ] && echo "This is a recurring class: it warrants a prevention mechanism, not another note." ;;
+    list)  jq -rs 'group_by(.class)|map({class:.[0].class,seen:length,projects:(map(.project)|unique|length),last:(map(.date)|max),desc:.[-1].desc})|sort_by(-.seen)|.[]|"\(.seen)x  \(.class)  [\(.projects) project(s), last \(.last)]  \(.desc)"' "${led}" ;;
+    propose) # classes seen in 2+ projects are candidates for a harness-level change
+      jq -rs 'group_by(.class)|map(select((map(.project)|unique|length)>=2))|.[]|"CANDIDATE \(.[0].class): seen \(length)x across \(map(.project)|unique|length) projects — \(.[-1].desc)"' "${led}"
+      echo "A candidate becomes a harness change only as a branch of the harness repo that adds a failing benchmark or test case, passes the suite, and is approved by the operator. Nothing is applied from here." ;;
+    *) echo "usage: harness lessons add|list|propose" >&2; exit 1 ;;
+  esac
+}
+
+cmd_codex() {
+  # harness codex-review <review|plan|security|judgment> [--yes] <prompt-file | ->
+  local class="${1:-}"; shift 2>/dev/null || true
+  local yes=0; [ "${1:-}" = "--yes" ] && { yes=1; shift; }
+  local pf="${1:-}"
+  [ -e "${CLAUDE_DIR}/codex-routing.on" ] || { echo "CODEX-OFF: Codex routing is off (${CLAUDE_DIR}/codex-routing.on absent). Finish on the Claude ladder."; exit 3; }
+  command -v codex >/dev/null 2>&1 || { echo "CODEX-UNAVAILABLE: codex CLI is not installed. Finish on the Claude ladder and tell the operator in one line."; exit 4; }
+  local tiers="${H_DIR}/codex-tiers"; [ -f "${tiers}" ] || tiers="${SELF_DIR}/../config/codex-tiers"
+  local line; line="$(grep -E "^${class}[[:space:]]" "${tiers}" 2>/dev/null | head -1)"
+  [ -n "${line}" ] || { echo "harness: unknown review class '${class}' (expected one of: $(grep -Ev '^#|^$' "${tiers}" | awk '{print $1}' | tr '\n' ' '))" >&2; exit 1; }
+  # shellcheck disable=SC2086
+  set -- ${line}; local model="$2" effort="$3" confirm="$4" fallback="${5:-}"
+  if [ "${confirm}" = "yes" ] && [ "${yes}" -ne 1 ]; then
+    echo "CONFIRM-NEEDED: class '${class}' uses ${model} at ${effort} (the priciest tier). Ask the operator, then re-run with --yes."; exit 5
+  fi
+  [ -n "${pf}" ] || { echo "usage: harness codex-review <class> [--yes] <prompt-file | ->" >&2; exit 1; }
+  local prompt; if [ "${pf}" = "-" ]; then prompt="$(cat)"; else prompt="$(cat "${pf}")" || exit 1; fi
+  prompt="You are an independent reviewer from a different vendor than the author. READ-ONLY: do not modify any file. Report only findings you can substantiate with a file:line citation and, where possible, a command you ran and its output. 'No findings' is a valid result. Do not report style, naming, or hypothetical risks.
+
+${prompt}"
+  local out; out="$(mktemp)"; local runner=""; command -v timeout >/dev/null 2>&1 && runner="timeout ${HARNESS_CODEX_TIMEOUT:-900}"
+  run_one() {
+    # shellcheck disable=SC2086
+    ${runner} codex exec --model "$1" --skip-git-repo-check -c "model_reasoning_effort=${effort}" -c 'sandbox_mode="read-only"' -o "${out}" "${prompt}" >"${out}.log" 2>&1 </dev/null
+  }
+  if run_one "${model}"; then :; else
+    local rc=$?
+    if [ -n "${fallback}" ] && grep -Eqi 'not supported|newer version|unknown model|does not exist' "${out}.log"; then
+      echo "NOTE: ${model} was rejected; retrying once on ${fallback}."; model="${fallback}"
+      run_one "${model}" || { echo "CODEX-FAILED (${model}): $(tail -n 3 "${out}.log" | tr '\n' ' ')"; rm -f "${out}" "${out}.log"; exit 6; }
+    else
+      echo "CODEX-FAILED (${model}, exit ${rc}): $(tail -n 3 "${out}.log" | tr '\n' ' ')"
+      echo "If this says the model is unsupported, run ${CLAUDE_DIR}/scripts/codex-refresh.sh and retry once. Do not conclude anything about the account from this error."
+      rm -f "${out}" "${out}.log"; exit 6
+    fi
+  fi
+  echo "=== Codex ${class} review (${model}, effort ${effort}, read-only) ==="
+  if [ -s "${out}" ]; then cat "${out}"; else tail -n 60 "${out}.log"; fi
+  rm -f "${out}" "${out}.log"
+}
+
+cmd_undo() {
+  local sid="${1:-}"; local root; root="$(h_root)"
+  if [ -z "${sid}" ]; then
+    echo "Checkpoints taken at session start for ${root} (newest first):"
+    git -C "${root}" for-each-ref --sort=-committerdate --format='  %(refname:lstrip=3)  %(committerdate:short)  %(objectname:short)' refs/harness/checkpoints 2>/dev/null | head -10
+    echo "Show what changed since one:   git diff <sha>"
+    echo "Restore tracked files to it:    git restore --source=<sha> --worktree -- ."
+    echo "(Files that were never tracked are not part of a checkpoint.)"
+  else
+    git -C "${root}" rev-parse "refs/harness/checkpoints/${sid}" 2>/dev/null || { echo "no checkpoint for session ${sid}" >&2; exit 1; }
+  fi
+}
+
+cmd_doctor() {
+  local ok=0 warn=0
+  good() { echo "  ok    $1"; ok=$((ok+1)); }
+  bad()  { echo "  WARN  $1"; warn=$((warn+1)); }
+  echo "ContextHarness doctor (${CLAUDE_DIR})"
+  [ -f "${CLAUDE_DIR}/harness/VERSION" ] && good "version $(cat "${CLAUDE_DIR}/harness/VERSION")" || bad "no installed version marker — run ./install.sh"
+  command -v jq >/dev/null 2>&1 && good "jq present" || bad "jq missing — every hook is INERT without it (they fail open)"
+  command -v git >/dev/null 2>&1 && good "git present" || bad "git missing — change detection and checkpoints are off"
+  { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; } && good "timeout present" || bad "no timeout command — a hanging verify recipe is only bounded by Claude Code's hook timeout"
+  grep -qxF '<!-- model-harness:start -->' "${CLAUDE_DIR}/CLAUDE.md" 2>/dev/null && good "core rules block installed ($(awk '/model-harness:start/{f=1} f{n+=length($0)+1} /model-harness:end/{f=0} END{print n}' "${CLAUDE_DIR}/CLAUDE.md") bytes always loaded)" || bad "core rules block missing from CLAUDE.md"
+  local a; for a in scout executor verifier architect oracle; do [ -f "${CLAUDE_DIR}/agents/${a}.md" ] || bad "agent ${a} not installed"; done
+  local h s="${CLAUDE_DIR}/settings.json"
+  for h in journal stop-gate session-state ops-guard destructive-guard context-meter; do
+    if [ -x "${CLAUDE_DIR}/hooks/${h}.sh" ] && grep -q "${h}.sh" "${s}" 2>/dev/null; then good "hook ${h}: installed and registered"
+    elif [ -x "${CLAUDE_DIR}/hooks/${h}.sh" ]; then bad "hook ${h}: script present but NOT registered in settings.json"
+    else echo "  off   hook ${h}: not installed (./install.sh --recommended enables it)"; fi
+  done
+  if h_off; then bad "kill switch is ON — all workflow hooks are disabled (harness on to re-enable)"; fi
+  [ -e "${CLAUDE_DIR}/codex-routing.on" ] && { command -v codex >/dev/null 2>&1 && good "Codex routing ON, codex $(codex --version 2>/dev/null | head -1)" || bad "Codex routing ON but the codex CLI is not installed"; } || echo "  off   Codex cross-vendor review (touch ${CLAUDE_DIR}/codex-routing.on to enable)"
+  echo "${ok} ok, ${warn} warning(s)"
+  [ "${warn}" -eq 0 ]
+}
+
+case "${1:-}" in
+  detect)        shift; cmd_detect "$@" ;;
+  trust-verify)  shift; cmd_trust "$@" ;;
+  status)        shift; cmd_status "$@" ;;
+  stats)         shift; cmd_stats "$@" ;;
+  lessons)       shift; cmd_lessons "$@" ;;
+  codex-review)  shift; cmd_codex "$@" ;;
+  undo)          shift; cmd_undo "$@" ;;
+  doctor)        cmd_doctor ;;
+  off)           mkdir -p "${H_DIR}"; touch "${H_DIR}/off"; echo "workflow hooks disabled (harness on to re-enable)" ;;
+  on)            rm -f "${H_DIR}/off"; echo "workflow hooks enabled" ;;
+  *)             sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

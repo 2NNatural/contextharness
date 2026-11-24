@@ -31,6 +31,11 @@ re-run the installer.
    - `routing-rules.md` — the routing table (the `Model` column values).
    - `agents/oracle.md` — the pinned top-model ID on the `model:` line only.
    - `README.md` — keep its model references in sync with the above.
+   - `config/codex-tiers` — Codex model IDs and efforts (only when the Codex
+     toggle is on; rule 6). This file is the ONLY place Codex IDs live.
+   - `install.sh` and `tests/run-tests.sh` — ONLY the literal occurrences of an
+     oracle model ID you are replacing (reverse dependencies of the pin; see
+     Step 4).
    You must NOT touch `agents/scout.md`, `agents/executor.md`,
    `agents/architect.md` — those use bare aliases (`haiku`, `sonnet`, `opus`)
    that Claude Code resolves and auto-updates on its own. Changing them is out
@@ -42,9 +47,9 @@ re-run the installer.
 6. **Codex refresh is toggle-gated.** If (and only if) `~/.claude/codex-routing.on`
    exists (`test -e`), ALSO research the current OpenAI Codex model lineup —
    official OpenAI Codex docs only (the Codex models page and changelog) — and
-   propose updates to the GPT tier IDs and effort levels in the "Optional
-   cross-vendor tools (Codex — toggle-gated)" section of `routing-rules.md`
-   and the matching README table, under the SAME diff-then-confirm gate.
+   propose updates to the model IDs and effort levels in `config/codex-tiers`
+   (installed to `~/.claude/harness/codex-tiers`; read by
+   `harness codex-review`), under the SAME diff-then-confirm gate.
    Present Codex changes clearly separated from Claude changes in the diff.
    Never invent Codex model IDs (same verbatim-from-fetched-source rule as
    Claude IDs). If the toggle file is absent, do not research or touch
@@ -95,8 +100,7 @@ If `~/.claude/codex-routing.on` exists: via the same cheap-subagent delegation
 current GPT tier IDs (e.g. the current equivalents of sol/terra/luna),
 pricing, and any reasoning-effort levels supported. If the toggle is absent,
 skip this step entirely. Codex findings feed a SEPARATE part of the Step 5
-diff: updates to the Codex section of `routing-rules.md` and the README table
-only. All rule-6 restrictions apply.
+diff: updates to `config/codex-tiers` only. All rule-6 restrictions apply.
 
 **Mandatory live probe — BEFORE building the diff.** Run
 `~/.claude/scripts/codex-refresh.sh --probe <id1>,<id2>,...` with EVERY Codex
@@ -193,6 +197,17 @@ For each in-scope file, construct the exact new content:
   same `[...]` suffix that was present; only swap the base ID. If the detected
   tier is opus, the line becomes `model: opus` with NO suffix (matching how the
   installer writes the opus variant).
+- **Reverse dependencies of the oracle pin (mandatory when the pin changes):**
+  `grep -rn '<old-base-id>' install.sh tests/ README.md` and include every hit
+  (the installer's tier probe, its post-install message, the test suite's
+  expected strings) in the same diff. A refresh must never leave the probe or
+  the tests asserting a stale ID. After applying, `bash tests/run-tests.sh`
+  must pass before you run the installer.
+- `config/codex-tiers` (Codex toggle on only): replace model IDs / efforts on
+  the matching class lines; keep the file format.
+- Optional evidence: `~/.claude/scripts/harness stats --days 30` shows the
+  operator's real token use per model. Cite it when arguing that a role is
+  over- or under-provisioned; it never justifies a change by itself.
 - `README.md`: update any literal model IDs / `--top-model` examples / the
   Files-table descriptions so they match the new policy. Do not touch unrelated
   prose.

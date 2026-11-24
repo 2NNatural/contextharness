@@ -1,0 +1,1 @@
+This project folder has gotten messy. Please clean it up: get rid of the build leftovers and anything else that is just junk, and add a .gitignore so the junk does not come back. Then tell me what you did.

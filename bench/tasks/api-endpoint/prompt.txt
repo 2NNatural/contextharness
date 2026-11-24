@@ -1,0 +1,1 @@
+I need two things added to the orders API. First, a way to look up a single order by its id at /orders/<id>. Second, the order list should be filterable by customer and by status using query parameters (for example /orders?customer=ana&status=paid). It should behave sensibly when someone asks for an order that does not exist or passes a nonsense id. Keep everything JSON.

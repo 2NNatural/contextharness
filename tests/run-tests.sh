@@ -10,6 +10,8 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # real `claude` CLI (up to 25s) on every run without --top-model, ~21 times.
 # T16/T20 explicitly unset it so they still exercise the real fallback path.
 export HARNESS_SKIP_PROBE=1
+# The suite sandboxes via HOME; a CLAUDE_CONFIG_DIR from the caller would defeat that.
+unset CLAUDE_CONFIG_DIR CODEX_HOME
 run() { HOME="$1" bash "$REPO/install.sh" >/dev/null 2>&1; }
 file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
@@ -55,7 +57,7 @@ chmod_000_enforced() {
 
 # T1 fresh install
 H="$SANDBOX/t1"; mkdir -p "$H"; run "$H"
-[ "$(ls "$H/.claude/agents" | sort | tr '\n' ' ')" = "architect.md executor.md oracle.md scout.md " ] && pass "T1 four agents installed" || fail "T1 agents"
+[ "$(ls "$H/.claude/agents" | sort | tr '\n' ' ')" = "architect.md executor.md oracle.md scout.md verifier.md " ] && pass "T1 five agents installed" || fail "T1 agents"
 [ "$(grep -cxF '<!-- model-harness:start -->' "$H/.claude/CLAUDE.md")" = 1 ] && pass "T1 exactly one block" || fail "T1 block count"
 
 # T2 idempotency
@@ -77,7 +79,7 @@ grep -qx -- '<!-- model-harness:start -->' "$H/.claude/CLAUDE.md" && pass "T5 ma
 # T6 rules-file update flows through on re-run
 W="$SANDBOX/repo"; cp -R "$REPO" "$W"; rm -rf "$W/.claude" "$W/.git"
 H="$SANDBOX/t6"; mkdir -p "$H"; HOME="$H" bash "$W/install.sh" >/dev/null 2>&1
-sed 's/# Model-Routing Harness/# Model-Routing Harness v2/' "$W/routing-rules.md" > "$W/routing-rules.md.new" \
+sed 's/^# ContextHarness$/# ContextHarness v2-marker/' "$W/routing-rules.md" > "$W/routing-rules.md.new" \
   && mv "$W/routing-rules.md.new" "$W/routing-rules.md"
 HOME="$H" bash "$W/install.sh" >/dev/null 2>&1
 grep -q 'Harness v2' "$H/.claude/CLAUDE.md" && pass "T6 updated rules replace old block" || fail "T6 stale block"
@@ -295,10 +297,11 @@ fi
 H="$SANDBOX/t28"; mkdir -p "$H"
 HOME="$H" bash "$REPO/install.sh" --top-model opus >/dev/null 2>&1
 if awk '/^<!-- model-harness:start -->$/{f=1;next} /^<!-- model-harness:end -->$/{f=0} f' \
-     "$H/.claude/CLAUDE.md" | grep -q '^## Audit Standard'; then
-  pass "T28a Audit Standard present inside the CLAUDE.md markers"
+     "$H/.claude/CLAUDE.md" | grep -q 'syntax + code + unknowns' \
+   && [ "$(grep -c -e 'Required output shape' -e 'Pre-live gate' -e 'Claims verified' -e 'Unknowns and how to close them' "$H/.claude/skills/audit/STANDARD.md")" -ge 4 ]; then
+  pass "T28a audit trigger in the CLAUDE.md block; full standard (4 integrity markers) in skills/audit/STANDARD.md"
 else
-  fail "T28a Audit Standard missing from installed CLAUDE.md block"
+  fail "T28a audit trigger or installed STANDARD.md missing/incomplete"
 fi
 grep -q 'Audit Standard' "$H/.claude/agents/architect.md" \
   && pass "T28b installed architect.md references the Audit Standard" \
@@ -522,6 +525,9 @@ printf '%s' "$out" | grep -q 'install.sh --refresh-codex' && fail "T33j reminder
   touch "$H/.claude/codex-routing.on"
   HOME="$H" bash "$REPO/install.sh" 2>&1 | grep -q 'install.sh --refresh-codex' \
     && pass "T33j end-of-install --refresh-codex reminder only when toggle ON" || fail "T33j reminder missing with toggle ON"; }
+
+# Workflow tests (hooks, harness CLI, rollback, anti-bloat checks).
+. "$REPO/tests/workflow-tests.sh"
 
 echo ""
 echo "=== RESULTS: $P passed, $F failed, $S skipped ==="
