@@ -70,7 +70,7 @@ A **model-routing harness for Claude Code**: one long-lived orchestrator thread 
 - **Claude Code subagents** — `scout`, `executor`, `architect`, `oracle` (see role table below).
 - **Claude Code Skills** — `skills/routing-refresh/SKILL.md`.
 - **git / GitHub `gh`** — repo `2NNatural/contextharness`, default branch `main`.
-- **`claude` CLI** — used by the installer's tier probe: `claude -p --model claude-fable-5-1 --max-turns 1 'hi'` (reuses Claude Code OAuth/keychain auth; no API key needed).
+- **`claude` CLI** — used by the installer's tier probe: `claude -p --model claude-fable-5-2 --max-turns 1 'hi'` (reuses Claude Code OAuth/keychain auth; no API key needed).
 - **`curl` + `jq`** — fallback probe path only when `ANTHROPIC_API_KEY` is set.
 - **WebSearch / WebFetch** — live model research inside the routing-refresh skill.
 

@@ -156,15 +156,15 @@ HOME="$H" bash "$REPO/install.sh" --top-model opus >/dev/null 2>&1
 installed_oracle="$H/.claude/agents/oracle.md"
 if grep -qx 'model: opus' "$installed_oracle" \
    && ! grep -q 'claude-fable-5' "$installed_oracle" \
-   && grep -qx 'model: claude-fable-5-1\[1m\]' "$REPO/agents/oracle.md"; then
+   && grep -qx 'model: claude-fable-5-2\[1m\]' "$REPO/agents/oracle.md"; then
   pass "T15a opus: installed oracle has model: opus, repo copy unchanged"
 else
   fail "T15a opus: installed oracle model wrong or repo copy modified"
 fi
 # Now switch back to fable in the same HOME
 HOME="$H" bash "$REPO/install.sh" --top-model fable >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5-1\[1m\]' "$installed_oracle"; then
-  pass "T15b fable: re-run restores installed oracle to model: claude-fable-5-1[1m]"
+if grep -qx 'model: claude-fable-5-2\[1m\]' "$installed_oracle"; then
+  pass "T15b fable: re-run restores installed oracle to model: claude-fable-5-2[1m]"
 else
   fail "T15b fable: installed oracle not restored"
 fi
@@ -173,8 +173,8 @@ fi
 # Strip ANTHROPIC_API_KEY and claude CLI from PATH so probe is deterministically inconclusive.
 H="$SANDBOX/t16"; mkdir -p "$H"
 env -u ANTHROPIC_API_KEY -u HARNESS_SKIP_PROBE HOME="$H" PATH="/usr/bin:/bin" bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5-1\[1m\]' "$H/.claude/agents/oracle.md"; then
-  pass "T16 non-TTY default: installed oracle retains model: claude-fable-5-1[1m]"
+if grep -qx 'model: claude-fable-5-2\[1m\]' "$H/.claude/agents/oracle.md"; then
+  pass "T16 non-TTY default: installed oracle retains model: claude-fable-5-2[1m]"
 else
   fail "T16 non-TTY default: installed oracle wrong"
 fi
@@ -209,7 +209,7 @@ cmp -s "$SANDBOX/t19.before" "$H/.claude/skills/routing-refresh/SKILL.md" \
 H="$SANDBOX/t20"; mkdir -p "$H"
 env -u ANTHROPIC_API_KEY -u HARNESS_SKIP_PROBE HOME="$H" PATH="/usr/bin:/bin" \
   bash "$REPO/install.sh" </dev/null >/dev/null 2>&1
-if grep -qx 'model: claude-fable-5-1\[1m\]' "$H/.claude/agents/oracle.md"; then
+if grep -qx 'model: claude-fable-5-2\[1m\]' "$H/.claude/agents/oracle.md"; then
   pass "T20 no-API probe falls back to fable"
 else
   fail "T20 probe fallback wrong: $(grep '^model:' "$H/.claude/agents/oracle.md")"
