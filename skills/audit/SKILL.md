@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run a full Audit Standard audit of a target (a diff, a path, a module, or the current branch). Use when the user says "audit", "review this", "check this", "verify this", "is this safe", runs /audit, or uses the shorthand "syntax + code + unknowns". Extracts the Audit Standard verbatim from the installed CLAUDE.md, reads the project's INTERFACES.md, gathers liveness evidence via scout, and routes the verdict to a read-only architect.
+description: Run a full Audit Standard audit of a target (a diff, a path, a module, or the current branch). Use when the user says "audit", "review this", "check this", "verify this", "is this safe", runs /audit, or uses the shorthand "syntax + code + unknowns". Loads the Audit Standard verbatim from its own STANDARD.md, reads the project's INTERFACES.md, gathers liveness evidence via scout, and routes the verdict to a read-only architect.
 ---
 
 # /audit — Audit Standard runner
@@ -16,29 +16,17 @@ The target is a diff, a path, a module, or "current branch" (=
 target is ambiguous, ask ONE question and stop. Never guess a target — auditing
 the wrong thing and reporting clean is the worst outcome.
 
-## Step 1 — Extract the Audit Standard verbatim (never from memory, never a copy)
+## Step 1 — Load the Audit Standard verbatim (never from memory)
 
-The Audit Standard is single-sourced in `routing-rules.md` (installed inside the
-`<!-- model-harness:start/end -->` block of `~/.claude/CLAUDE.md`). Never paraphrase
-it, never rely on a memorized or previously-pasted copy — extract it fresh, every
-run, from the installed file. Prefer the installed `~/.claude/CLAUDE.md`:
+The standard is single-sourced in `STANDARD.md` next to this file
+(`~/.claude/skills/audit/STANDARD.md`). Read it fresh every run; never paraphrase it and
+never rely on a remembered copy.
 
-```
-awk '/^## Audit Standard/ {inblk=1; print; next}
-     inblk && /^<!-- model-harness:end -->/ {exit}
-     inblk && /^## / {exit}
-     inblk {print}' ~/.claude/CLAUDE.md
-```
+Integrity check: the text must contain ALL of `Required output shape`, `Pre-live gate`,
+`Claims verified`, `Unknowns and how to close them`. If the file is missing or any marker
+is absent, ABORT with:
 
-Fallback (installed file missing or empty): run the identical `awk` pattern against
-`./routing-rules.md` in the harness repo.
-
-Then run an integrity check: the extracted text must contain ALL of `Required
-output shape`, `Pre-live gate`, `Claims verified`, `Unknowns and how to close
-them`. If any are missing, or the extraction is empty, ABORT with:
-
-> Audit Standard not found in ~/.claude/CLAUDE.md — run ./install.sh from the
-> harness repo and retry.
+> Audit Standard not found — run ./install.sh from the harness repo and retry.
 
 Running a degraded audit is itself a silent fallback, which the standard forbids.
 
@@ -102,26 +90,22 @@ Never write the missing lists yourself — you did not do the analysis.
 
 ## Step 6 — Codex second opinion (toggle-gated; alongside, never instead)
 
-Check `test -e ~/.claude/codex-routing.on`.
+Check `test -e ~/.claude/codex-routing.on`. Absent → do nothing Codex-related. Present →
+you MAY additionally get a read-only second opinion: write the audit target and the
+standard to a scratch file and run `~/.claude/scripts/harness codex-review <class> <file>`
+with class `security` (vulnerability audit), `judgment` (subjective design or mechanism
+flaws: math, market/execution mechanisms, formal-verification parameters, algorithm and
+data-model design, efficiency and data audits) or `review` (adversarial review of a risky
+change). `security` and `judgment` print CONFIRM-NEEDED: ask the operator, then re-run
+with `--yes`. Model IDs and efforts live only in `~/.claude/harness/codex-tiers`.
 
-- Absent → do nothing Codex-related (you may mention it exists, but do not invoke
-  it).
-- Present → you MAY additionally run a read-only second opinion, per the Codex ON
-  table: security/vulnerability audit → `gpt-5.6-sol` effort high, confirm with the
-  user first; high-level judgment audit (subjective design/mechanism flaws — math,
-  market/execution mechanisms, formal-verification parameters, algorithm and
-  data-model design, efficiency and data audits) → `gpt-5.6-sol` effort xhigh,
-  confirm with the user first; otherwise, adversarial review of a risky change →
-  `gpt-5.6-terra` effort medium, no confirm needed.
-
-  Spawn `codex:codex-rescue` via the Agent tool, strictly read-only. If the spawn
-  fails, say so in one line and return the Claude verdict alone. Present both
-  opinions separately, clearly labelled; never merge them; never let the Codex
-  opinion downgrade a Claude finding.
+If the command reports CODEX-OFF, CODEX-UNAVAILABLE or CODEX-FAILED, say so in one line
+and return the Claude verdict alone. Present both opinions separately, clearly labelled;
+never merge them; never let the Codex opinion downgrade a Claude finding.
 
 ## Failure modes (handle explicitly)
 
-- Standard not extractable → abort per Step 1. Never audit from memory.
+- Standard not loadable → abort per Step 1. Never audit from memory.
 - No INTERFACES.md → proceed, record as an Unknown.
 - Scouts find no log or journal at all for a link → NO-EVIDENCE-SOURCE, treated as
   broken, not unknown; pass that through to `architect` unchanged.

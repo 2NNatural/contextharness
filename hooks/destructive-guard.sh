@@ -66,6 +66,21 @@ is_scratch() {
   return 1
 }
 
+# True if deleting/moving this path loses nothing git cannot give back: it does
+# not exist yet, it is a clean tracked file, or it is git-ignored (build output).
+# Untracked files and files with uncommitted changes are NOT restorable — that is
+# exactly the accident this guard exists for.
+is_restorable() {
+  local p="$1" d st
+  case "$p" in *..*) return 1 ;; esac
+  [ -e "$p" ] || [ -L "$p" ] || { d="$(dirname "$p")"; [ -d "$d" ] && git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1; return $?; }
+  d="$p"; [ -d "$d" ] || d="$(dirname "$p")"
+  git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  case "$(cd "$d" 2>/dev/null && pwd -P)/" in */.git/*) return 1 ;; esac
+  st="$(git -C "$d" status --porcelain --ignored -- "$p" 2>/dev/null)" || return 1
+  [ -z "$(printf '%s\n' "$st" | grep -v '^!!' | grep -v '^$')" ]
+}
+
 command -v jq >/dev/null 2>&1 || exit 0
 payload="$(cat)" || exit 0
 [ -n "$payload" ] || exit 0
@@ -136,7 +151,7 @@ for tok in $scan; do
     /*)    abs="$tok" ;;
     *)     abs="${cwd%/}/${tok}" ;;
   esac
-  is_scratch "$abs" || outside="${outside} ${tok}"
+  is_scratch "$abs" || is_restorable "$abs" || outside="${outside} ${tok}"
 done
 
 # candidates==0 means we found a destructive verb but no target we can inspect

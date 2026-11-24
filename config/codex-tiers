@@ -1,0 +1,8 @@
+# Codex model tiers used by `harness codex-review`. One line per task class:
+#   <class> <model-id> <reasoning-effort> <confirm-with-operator: yes|no> [fallback-model]
+# This file is the ONLY place Codex model IDs live. The routing-refresh skill
+# updates it (diff-then-confirm, live-probed IDs only). Effort ceiling is xhigh.
+review    gpt-6-luna   xhigh no
+plan      gpt-6.1-sol  high  no
+security  gpt-6-astra  high  yes gpt-6.1-sol
+judgment  gpt-6-astra  xhigh yes gpt-6.1-sol

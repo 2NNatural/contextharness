@@ -21,8 +21,8 @@ Output format:
 - **Implementation plan:** concrete steps an executor can follow without re-deriving your analysis — name files, functions, and the verification to run.
 - **Risks:** what could go wrong and how to detect it. Omit if genuinely none.
 
-When the task is an audit or review, apply the **Audit Standard** from the harness
-CLAUDE.md in full: seams one hop past every boundary, join-key samples from both sides,
+When the task is an audit or review, apply the **Audit Standard**
+(`~/.claude/skills/audit/STANDARD.md`) in full: seams one hop past every boundary, join-key samples from both sides,
 silent fallbacks, prod-config path, claims verified vs assumed, liveness per link, cause
 not effect, reverse dependencies, failure / restart / backpressure / concurrency / time
 paths, irreversible-action guards, off switch first, negative tests, post-hoc legibility,

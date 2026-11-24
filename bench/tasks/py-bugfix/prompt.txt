@@ -1,0 +1,1 @@
+The sales report only shows two products at the top even though it is supposed to show the top three. Please fix it.
