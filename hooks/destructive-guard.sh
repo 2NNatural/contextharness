@@ -118,21 +118,35 @@ case " $cmd " in
   *" HARNESS_ALLOW_DESTRUCTIVE=1 "*) [ -z "$agent" ] && exit 0 ;;
 esac
 
-# Flatten shell operators so they are not mistaken for path tokens.
-scan="$(printf '%s' "$cmd" | tr '\n\t' '  ' \
-        | sed -e 's/&&/ /g' -e 's/||/ /g' -e 's/[;|()]/ /g' -e 's/2>&1/ /g')"
+# Drop here-document bodies (file contents are data, not delete targets), then turn
+# shell operators and newlines into an explicit separator token, so one command's
+# arguments are never mistaken for the next command's targets.
+scan="$(printf '%s\n' "$cmd" \
+        | awk 'hd != "" { if ($0 == hd) hd = ""; next }
+               { print; if (match($0, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
+                   t = substr($0, RSTART, RLENGTH); gsub(/<<-?[ \t]*|["\047]/, "", t); hd = t } }' \
+        | tr '\n\t' '; ' \
+        | sed -e 's/2>&1/ /g' -e 's/&&/ @@SEP@@ /g' -e 's/||/ @@SEP@@ /g' -e 's/[;|()]/ @@SEP@@ /g')"
 
-# Only tokens AFTER the destructive verb are treated as targets — this keeps
-# `grep -rn "rm" src/`-style commands from flagging their own leading words.
-armed=0; seen_git=0; candidates=0; outside=""
+# Only tokens AFTER the destructive verb, up to the next separator, are treated as
+# targets — this keeps `grep -rn "rm" src/`-style commands from flagging their own
+# leading words, and keeps a later `cat > file` out of an earlier delete's targets.
+armed=0; seen_git=0; candidates=0; seg_candidates=0; bare=0; outside=""; assigns=""
 for tok in $scan; do
   tok="${tok%\"}"; tok="${tok#\"}"; tok="${tok%\'}"; tok="${tok#\'}"
   [ -n "$tok" ] || continue
+  if [ "$tok" = "@@SEP@@" ]; then
+    # A destructive verb with nothing inspectable after it (`xargs rm -f`) is unprovable.
+    [ "$armed" -eq 1 ] && [ "$seg_candidates" -eq 0 ] && bare=1
+    armed=0; seen_git=0; continue
+  fi
   if [ "$armed" -eq 0 ]; then
     case "$tok" in
-      rm|rmdir|mv|shred|del|Remove-Item|*/rm|*/rmdir|*/mv|*/shred) armed=1 ;;
+      # Remember literal path assignments (S=/tmp/x) so `rm $S/file` can be resolved.
+      [A-Za-z_]*=/*) case "$tok" in *'$'*|*'`'*) ;; *) assigns="${assigns} ${tok}" ;; esac ;;
+      rm|rmdir|mv|shred|del|Remove-Item|*/rm|*/rmdir|*/mv|*/shred) armed=1; seg_candidates=0 ;;
       git) seen_git=1 ;;
-      clean) [ "$seen_git" -eq 1 ] && armed=1 ;;
+      clean) [ "$seen_git" -eq 1 ] && { armed=1; seg_candidates=0; } ;;
     esac
     continue
   fi
@@ -141,7 +155,16 @@ for tok in $scan; do
     '&'|'>'|'<'|'>>'|'2>') continue ;;
     /dev/null|/dev/stdout|/dev/stderr|/dev/tty) continue ;;
   esac
-  candidates=$((candidates+1))
+  candidates=$((candidates+1)); seg_candidates=$((seg_candidates+1))
+  for kv in $assigns; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    case "$tok" in
+      "\$${k}")       tok="${v}" ;;
+      "\$${k}/"*)     tok="${v}/${tok#*/}" ;;
+      "\${${k}}")     tok="${v}" ;;
+      "\${${k}}/"*)   tok="${v}/${tok#*/}" ;;
+    esac
+  done
   # Anything we cannot expand ($VAR, $(...), backticks) cannot be proved safe.
   case "$tok" in *'$'*|*'`'*) outside="${outside} ${tok}"; continue ;; esac
   tok="${tok%/\*}"; tok="${tok%\*}"
@@ -156,7 +179,8 @@ done
 
 # candidates==0 means we found a destructive verb but no target we can inspect
 # (bare `git clean -fd`, `xargs rm -f`). Cannot prove safety => block.
-if [ "$candidates" -eq 0 ] || [ -n "$outside" ]; then
+[ "$armed" -eq 1 ] && [ "$seg_candidates" -eq 0 ] && bare=1
+if [ "$candidates" -eq 0 ] || [ "$bare" -eq 1 ] || [ -n "$outside" ]; then
   if [ -n "$outside" ]; then
     why="target(s) outside the scratchpad:${outside}"
   else

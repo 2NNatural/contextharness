@@ -57,14 +57,18 @@ changes the outcome. Never de-escalate mid-task.
 - `stop-gate` hook runs when the agent tries to finish. If code changed since the last
   successful verification it (a) runs the project's trusted `.claude/harness/verify.sh` and
   blocks on failure with the output, or (b) when no recipe exists, blocks once if nothing
-  at all was executed after the last edit. Blocks are bounded (3 per session) so it can
-  never loop forever; when the bound is hit it lets go and tells the operator the work is
-  UNVERIFIED.
+  that runs code was executed after the last change. Change detection comes from git
+  (so edits made through the shell count), docs-only changes are exempt, a question to the
+  operator is not a claim of completion, plan mode and subagents are never gated. Blocks
+  are bounded per operator request (2), so it can never loop; when the bound is hit it
+  lets go and tells the operator the work is UNVERIFIED.
 - `verify` skill creates the project recipe on first use: `harness detect` finds the real
   test/build/run commands deterministically, the skill writes `verify.sh` plus a short
   `VERIFY.md` (how to launch, drive, observe, clean up), runs it once to prove it, and
-  registers its hash with `harness trust-verify`. A recipe that arrives with a cloned repo
-  is not trusted and is never executed automatically.
+  registers its hash with `harness trust-verify` (stored outside the project). A recipe
+  that arrives with a cloned repo, or that is edited after being trusted, is never run
+  automatically, and re-trusting an already-trusted project goes to the operator — the
+  agent cannot weaken its own exam.
 - Review findings count only with a reproduction (command + observed output). Verdicts
   come from an agent that did not write the code.
 
@@ -104,6 +108,32 @@ Least privilege by role (only executor writes; verifier runs but cannot edit),
 access; in unattended sessions an "ask" is a refusal), untrusted verify recipes never
 auto-run, external skills/plugins are reviewed before install (core rule), and every hook
 is honest about being a tripwire against accidents rather than a sandbox.
+
+## Independent design review
+
+Before implementation the design was handed to a separate reviewer with instructions to
+find how it would fail in practice. Material findings and what was done:
+
+| Finding | Resolution |
+|---|---|
+| The agent could weaken `verify.sh` and re-trust it | Trust stored outside the project; a changed recipe is not honoured; re-trust is an operator decision (`ops-guard`); tested (T37p, T38g) |
+| "Something ran after the edit" is satisfied by `ls` | Only commands that run code count; listing, reading, moving and git bookkeeping do not (T36a, T37e) |
+| Edits made via the shell were invisible | Change detection from git status, not tool events |
+| A per-session block budget dies on the first hard task of a long-lived thread | Budget is per operator request (T37d) |
+| Stop fires on every turn end, including questions | A closing question is never blocked (T37i) |
+| Moving the Audit Standard would break `/audit` and the installer | Single-sourced in the skill; installer copies whole skill directories (T28a) |
+| Verify timeout would read as a pass | Timeout is reported as a failure (T37q) |
+| Docs-only edits and worktrees | Docs exempt (T37h); trust keyed on the repository's common git dir so worktrees share it |
+| Loop detector false-fires in red-green cycles | Count resets on any edit; keyed per agent (T36d) |
+| Parallel subagents racing on state | Append-only single-line journal entries; counts derived at read time |
+| Stale STATE.md injected into unrelated work | One-line pointer on fresh start, content only on resume/compaction, 7-day freshness, 2 KB cap (T39) |
+| ops-guard gaps (script names, push to main, Read tool) and false positives | Added; matches only the leading words of each command segment, ignores heredoc bodies (T38, T41j) |
+| Destructive guard blocks every in-project delete | Now blocks only what git cannot restore (T41) |
+| `learn` could author auto-executed hooks | `learn` may not touch hooks, trust or global rules |
+| No kill switch, no hook self-test | `harness off`, `harness doctor`, `tests/live-hooks.sh` |
+
+Not done: the same challenge from Codex. The Codex CLI was not installed or authenticated
+in the build environment, so the cross-vendor half of the design review did not happen.
 
 ## What was deliberately not built
 

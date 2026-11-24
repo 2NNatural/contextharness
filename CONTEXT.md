@@ -162,6 +162,17 @@ Roles, the model each is pinned to, and its **default** effort:
 
 ---
 
+13. **(2026-11-24) v2: enforce, don't request.** Audit finding: v1's routing was real but correctness lived in prose. Decided:
+    - **Hooks carry the behaviours that matter** (verification gate, session recovery, ops guard, loop detection). Skills carry method; the always-loaded block carries only routing, rigor modes, definition of done, autonomy and report shape.
+    - **The Audit Standard moved out of the always-loaded block** into `skills/audit/STANDARD.md` (reverses the placement in decision 12; the text is unchanged). Reason: ~6 KB in every session of every project for something used occasionally. A trigger line stays in the core.
+    - **Codex model IDs live only in `config/codex-tiers`**, read by `harness codex-review` (replaces the "spawn `codex:codex-rescue`, unverified" path of decision 9). The toggle and the read-only policy are unchanged.
+    - **Verify recipes must be trusted** (hash stored outside the project) and the agent cannot re-trust a changed one.
+    - **Self-modification stays manual:** lessons are recorded automatically; harness-level changes ship only as a tested branch the operator approves; installs are versioned with `--rollback`.
+    - **pstack was mined, not installed; Grok Bot is not a dependency.** Rationale in `docs/GAP-ANALYSIS.md`.
+    - **Hooks remain opt-in** (`--recommended`), preserving "a plain install never touches settings.json".
+
+---
+
 ## 6. Corrections & behavior updates (this session)
 
 - **Don't fabricate against a template.** The Session-Start template referenced `CONTEXT.md`/`PROGRESS.md`/`ROADMAP.md`, which did **not** exist in the repo at the time. Correct behavior was to flag that and not invent the structured report against missing files. (Those files now exist — created this session.)

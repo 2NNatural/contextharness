@@ -67,6 +67,14 @@ h_last_change() {
   printf '%s' "${max}"
 }
 
+# Drop here-document bodies: they are data (file contents, scripts), not commands,
+# and their words must never be read as command names or as targets.
+h_strip_heredocs() {
+  printf '%s\n' "$1" | awk 'hd != "" { if ($0 == hd) hd = ""; next }
+    { print; if (match($0, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
+        t = substr($0, RSTART, RLENGTH); gsub(/<<-?[ \t]*|["\047]/, "", t); hd = t } }'
+}
+
 # Is this command worth counting as "the change was exercised"? Listing, reading,
 # moving files and plain git bookkeeping are not. Anything that runs code is.
 h_is_evidence() {
@@ -84,7 +92,7 @@ h_is_evidence() {
       '#'*|'') ;;
       *) ev=0 ;;
     esac
-  done <<<"$(printf '%s' "${cmd}" | sed -E 's/(&&|\|\||[;|&])/\n/g')"
+  done <<<"$(h_strip_heredocs "${cmd}" | sed -E 's/(&&|\|\||[;|&])/\n/g')"
   set +f
   return "${ev}"
 }

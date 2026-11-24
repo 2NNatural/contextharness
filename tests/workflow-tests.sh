@@ -228,7 +228,17 @@ dg() { printf '%s' "$(jq -cn --arg c "$1" --arg d "$GP" '{tool_name:"Bash",tool_
 [ "$(dg 'rm notes-untracked.txt')" = 2 ] && pass "T41c removing an untracked file is still blocked (unrecoverable)" || fail "T41c allowed unrecoverable delete"
 echo changed >> "$GP/tracked.txt"; [ "$(dg 'rm tracked.txt')" = 2 ] && pass "T41d removing a file with uncommitted changes is blocked" || fail "T41d allowed loss of uncommitted work"
 [ "$(dg 'rm -rf .')" = 2 ] && [ "$(dg 'rm -rf ../somewhere-else')" = 2 ] && pass "T41e whole-project and outside-project deletes stay blocked" || fail "T41e broad delete allowed"
+( cd "$GP" && git checkout -q -- tracked.txt )
+HD="$(printf 'rm -r build tracked.txt && cat > .gitignore <<'"'"'EOF'"'"'\n# Temp / scratch files\n/etc/passwd\n*.tmp\nEOF\ngit status --short')"
+[ "$(dg "$HD")" = 0 ] && pass "T41f words inside a heredoc body are not delete targets; a later command's args are not either" || fail "T41f heredoc/next-command text treated as a delete target"
+[ "$(dg 'S=/tmp/claude-scratch/x; rm -f $S/t.db')" = 0 ] && [ "$(dg 'S=/tmp/claude-scratch/x; rm -f ${S}/t.db')" = 0 ] \
+  && pass "T41g a literal scratch-path variable set in the same command is resolved" || fail "T41g scratch variable not resolved"
+[ "$(dg 'rm -f $UNKNOWN/t.db')" = 2 ] && [ "$(dg 'S=/etc; rm -rf $S/cron.d')" = 2 ] \
+  && pass "T41h unknown variables and variables pointing outside scratch stay blocked" || fail "T41h variable bypass"
+[ "$(dg 'find . -name "*.bak" | xargs rm -f; echo done')" = 2 ] && pass "T41i a delete with no inspectable target stays blocked even when another command follows" || fail "T41i bare delete slipped through"
 rm -rf "${GP:?}"
+new_env
+og "$(printf 'cat > notes.py <<EOF\nprintenv\ncat .env\nterraform apply\nEOF\npython3 notes.py')" && fail "T41j heredoc body lines were treated as commands by ops-guard" || pass "T41j ops-guard ignores heredoc bodies"
 
 # ---------------------------------------------------------------- T42 anti-bloat and consistency
 sz="$(wc -c < "$REPO/routing-rules.md")"

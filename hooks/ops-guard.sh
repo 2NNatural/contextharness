@@ -97,6 +97,6 @@ while IFS= read -r seg; do
       t="${a}"
       case "${t##*/}" in *deploy*|*release*|*publish*|*prod*|*migrate*) ask "\`${t##*/}\` looks like a deploy/release/migration script." ;; esac ;;
   esac
-done <<<"$(printf '%s' "${cmd}" | sed -E 's/(&&|\|\||[;|&])/\n/g')"
+done <<<"$(h_strip_heredocs "${cmd}" | sed -E 's/(&&|\|\||[;|&])/\n/g')"
 set +f
 exit 0

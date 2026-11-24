@@ -4,6 +4,19 @@
 
 ---
 
+### [NEXT] Run the Codex half that could not be run in the v2 build
+- On a machine with the Codex CLI logged in: `touch ~/.claude/codex-routing.on`, `~/.claude/scripts/harness doctor`, then one real `harness codex-review review <file>`. Confirm the model/effort/read-only flags are accepted by the installed CLI version.
+- Then have Codex challenge `docs/ARCHITECTURE.md` (the cross-vendor design review that v2 owes).
+
+### [NEXT] Make the benchmark discriminating
+- The six tasks are at or near ceiling for a strong orchestrator, so they cannot show a correctness difference between harness versions. Add tasks drawn from real defects the operator catches (target 20-50), each with a hidden check. See docs/BENCHMARK.md.
+
+### [SOON] Port stop-gate + journal to Codex CLI hooks
+- Codex now has a Claude-style hook system. Same definition of done in both tools.
+
+### [SOON] Review each project's first `VERIFY.md`
+- The verify recipe is agent-written. For high-stakes projects read it once.
+
 ### [NEXT] Decide whether Sonnet 5 should absorb some `architect`-tier work
 - Sonnet 5 is ~Opus 4.8 quality at ⅓ the price ($3/$15 vs $5/$25). Real cost win for design-tradeoff / risky-change-review tasks currently sent to `architect` (opus).
 - This changes *which role handles which task* (the Task column), which is **outside the routing-refresh skill's safe scope** — it's a human call.
@@ -35,14 +48,14 @@
 ### [MAYBE] Model-map denominator (derive 200k vs 1M from .message.model + [1m] marker if a reliable signal exists)
 - Transcript lines carry `.message.model`. If a dependable mapping from model ID (plus the `[1m]` context-window marker) to true window size exists, the context-meter hook could pick the right denominator per-model automatically instead of one global default.
 
-### [SOON] routing-refresh must check reverse dependencies when re-pinning oracle
+### [DONE in v2] routing-refresh must check reverse dependencies when re-pinning oracle
 - `f877029` changed the oracle pin (`claude-fable-5[1m]` → `claude-fable-5-1[1m]`) and left `tests/run-tests.sh`'s expected strings and `install.sh`'s tier-probe id asserting the old base id — fixed manually in the 2026-09-02 session (see PROGRESS.md F1/F2).
 - Extend the `routing-refresh` skill's Step 4 to `grep` `tests/` and `install.sh` for the old base id whenever it changes the pin, and include those updates in the same diff-then-confirm gate — so a refresh can never silently leave the test suite or the probe asserting a stale id.
 
 ### [MAYBE] Scope the destructive guard to subagents by default
 - Currently `HARNESS_GUARD_SCOPE=all` (every Bash call) is the default, deliberately, because `.agent_id`/`.agent_type` payload fields are unverified on this build. Once verified live with `claude --debug` that those fields populate reliably for subagent calls, switch the recommended default to `subagent` scope for lower main-thread friction.
 
-### [MAYBE] Machine-checkable INTERFACES.md parser for the pre-live gate
+### [SOON] Machine-checkable INTERFACES.md parser for the pre-live gate
 - The Audit Standard's Pre-live gate currently relies on `architect`/`scout` reading `INTERFACES.md` by eye. A small parser that fails the gate automatically on stale (`> N` days) or `NEVER FIRED` rows would make "an unverified link blocked the release" enforceable in CI, not just in a prose audit.
 
 ---
