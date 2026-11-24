@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 cd "$1" || exit 1
-python3 - <<'PY'
+PY="${PY:-$(command -v python3 >/dev/null 2>&1 && echo python3 || echo python)}"
+"$PY" - <<'PY'
 import pricing
 assert pricing.apply_tax(1050, 5) == 1103, pricing.apply_tax(1050, 5)
 assert pricing.apply_tax(1000, 10) == 1100
@@ -13,5 +14,5 @@ assert pricing.order_total([(1050, 1)], 0, 5) == 1103
 assert pricing.apply_discount(1000, 10) == 900
 PY
 [ $? -eq 0 ] || exit 1
-python3 -m unittest -q test_pricing 2>/dev/null || { echo "FAIL: existing tests broken"; exit 1; }
+"$PY" -m unittest -q test_pricing 2>/dev/null || { echo "FAIL: existing tests broken"; exit 1; }
 n=$(grep -c 'def test_' test_pricing.py); [ "$n" -gt 3 ] || { echo "FAIL: no regression test added for the reported case"; exit 1; }

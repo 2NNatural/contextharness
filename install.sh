@@ -196,7 +196,7 @@ hook_events() {
   case "$1" in
     context-meter)     printf 'UserPromptSubmit\t-\t-\n' ;;
     destructive-guard) printf 'PreToolUse\tBash\t-\n' ;;
-    ops-guard)         printf 'PreToolUse\tBash|Read\t-\n' ;;
+    ops-guard)         printf 'PreToolUse\tBash|Read|Write|Edit|MultiEdit|NotebookEdit\t-\n' ;;
     journal)           printf 'PostToolUse\tEdit|Write|MultiEdit|NotebookEdit|Bash\t-\nPostToolUseFailure\tBash\t-\n' ;;
     stop-gate)         printf 'Stop\t-\t300\n' ;;
     session-state)     printf 'SessionStart\t-\t-\n' ;;
@@ -232,13 +232,20 @@ install_hook() {
   touch "${SETTINGS_FILE}"
   [ -s "${SETTINGS_FILE}" ] || printf '{}\n' > "${SETTINGS_FILE}"
   while IFS=$'\t' read -r ev matcher to; do
-    if jq -e --arg c "${dst}" --arg e "${ev}" '[ .hooks[$e][]?.hooks[]?.command ] | any(. == $c)' "${SETTINGS_FILE}" >/dev/null 2>&1; then
+    # Already registered under the SAME matcher: nothing to do. Registered under an
+    # older matcher (an upgrade, e.g. ops-guard's former "Bash|Read"): our entry is
+    # taken out of its group and re-added once below, never duplicated.
+    if jq -e --arg c "${dst}" --arg e "${ev}" --arg m "${matcher}" '
+          [ .hooks[$e][]? | select(any(.hooks[]?; .command == $c)) | (.matcher // "-") ]
+          | length > 0 and all(. == $m)' "${SETTINGS_FILE}" >/dev/null 2>&1; then
       continue
     fi
     tmp="$(mktemp)"
     if jq --arg c "${dst}" --arg e "${ev}" --arg m "${matcher}" --arg t "${to}" '
           .hooks = (.hooks // {})
-          | .hooks[$e] = (.hooks[$e] // [])
+          | .hooks[$e] = ((.hooks[$e] // [])
+              | map(if (.hooks? | type) == "array" then .hooks |= map(select(.command != $c)) else . end)
+              | map(select((.hooks? | type) != "array" or (.hooks | length) > 0)))
           | .hooks[$e] += [ ( (if $m == "-" then {} else {matcher: $m} end)
                 + { hooks: [ ({type: "command", command: $c} + (if $t == "-" then {} else {timeout: ($t|tonumber)} end)) ] } ) ]
         ' "${SETTINGS_FILE}" > "${tmp}" 2>/dev/null && jq empty "${tmp}" 2>/dev/null; then
@@ -365,8 +372,9 @@ snapshot() {   # tar of the managed paths that currently exist; keeps the last 5
   if [ -s "${list}" ]; then tar -C "${CLAUDE_DIR}" -cf "${dir}/files.tar" -T "${list}" 2>/dev/null || true; fi
   cp "${list}" "${dir}/manifest"; rm -f "${list:?}"
   cat "${H_HOME}/VERSION" > "${dir}/from-version" 2>/dev/null || true
+  # Keep the newest five. awk, not `head -n -5`: BSD head (macOS) rejects negative counts.
   # shellcheck disable=SC2012
-  ls -1d "${BACKUP_ROOT}"/*/ 2>/dev/null | sort | head -n -5 | while IFS= read -r old; do
+  ls -1d "${BACKUP_ROOT}"/*/ 2>/dev/null | sort | awk '{a[NR]=$0} END{for(i=1;i<=NR-5;i++) print a[i]}' | while IFS= read -r old; do
     case "${old}" in "${BACKUP_ROOT}"/2*) rm -rf "${old:?}" ;; esac
   done
 }
@@ -502,7 +510,8 @@ fi
 [ -f "${REPO_DIR}/config/codex-tiers" ] && cp "${REPO_DIR}/config/codex-tiers" "${H_HOME}/codex-tiers"
 printf '%s\n' "${VERSION}" > "${H_HOME}/VERSION"
 
-# 1d. Hooks. All opt-in: a plain install never touches settings.json.
+# 1d. Hooks. All opt-in: a plain install never adds a hook to settings.json (it only
+# upgrades an existing ops-guard registration's matcher, below).
 if [ "${REMOVE_CONTEXT_HOOK}" -eq 1 ]; then remove_hook context-meter
 elif [ "${WITH_CONTEXT_HOOK}" -eq 1 ]; then install_hook context-meter; fi
 if [ "${REMOVE_GUARD}" -eq 1 ]; then remove_hook destructive-guard
@@ -515,6 +524,11 @@ for h in ${ALL_HOOKS} harness-lib; do
     cp "${HOOKS_SRC}/${h}.sh" "${HOOKS_DIR}/${h}.sh"; chmod +x "${HOOKS_DIR}/${h}.sh"
   fi
 done
+# ...and upgrade an existing ops-guard registration whose matcher changed between
+# versions (former "Bash|Read" -> also Write/Edit). Only an existing registration is
+# touched; a plain install never adds a hook.
+if [ "${WITH_WORKFLOW}" -eq 0 ] && [ "${REMOVE_WORKFLOW}" -eq 0 ] && [ -f "${HOOKS_DIR}/ops-guard.sh" ] \
+   && grep -q 'ops-guard.sh' "${SETTINGS_FILE}" 2>/dev/null; then install_hook ops-guard; fi
 
 # 1e. If top model is opus, rewrite the INSTALLED oracle.md only (repo copy untouched).
 INSTALLED_ORACLE="${AGENTS_DIR}/oracle.md"

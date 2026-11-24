@@ -2,6 +2,7 @@
 # harness — one small CLI for the deterministic parts of ContextHarness.
 #   harness detect [dir]              what kind of project is this and how is it tested/run (JSON)
 #   harness trust-verify [dir]        trust the project's .claude/harness/verify.sh (records its hash)
+#   harness untrust-verify [dir]      forget that trust (e.g. after removing the recipe on purpose)
 #   harness status [dir]              verify-recipe trust state for a project
 #   harness stats [--days N]          real token use per model from session transcripts
 #   harness lessons add|list|propose  the lesson ledger behind the `learn` skill
@@ -46,12 +47,13 @@ cmd_detect() {
   fi
   if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f requirements.txt ] || ls ./*.py >/dev/null 2>&1; then
     types+=(python)
+    local py; py="$(h_python)" || py=python3
     if [ -f pytest.ini ] || [ -d tests ] || grep -qs pytest pyproject.toml requirements*.txt setup.cfg tox.ini 2>/dev/null || [ -n "$(compgen -G "test_*.py")$(compgen -G "*_test.py")" ]; then
-      if python3 -c 'import pytest' 2>/dev/null; then test+=("python3 -m pytest -q"); else test+=("python3 -m unittest discover -q"); fi
+      if "${py}" -c 'import pytest' 2>/dev/null; then test+=("${py} -m pytest -q"); else test+=("${py} -m unittest discover -q"); fi
     fi
     grep -qsE '^(fastapi|flask|django|starlette|aiohttp)' requirements*.txt pyproject.toml 2>/dev/null && kinds+=(api)
     grep -qsE '(pandas|polars|pyspark|dbt-core|airflow|duckdb)' requirements*.txt pyproject.toml 2>/dev/null && kinds+=(data)
-    [ -f manage.py ] && run+=("python3 manage.py runserver")
+    [ -f manage.py ] && run+=("${py} manage.py runserver")
   fi
   [ -f Cargo.toml ] && { types+=(rust); test+=("cargo test"); build+=("cargo build"); }
   [ -f go.mod ] && { types+=(go); test+=("go test ./..."); build+=("go build ./..."); }
@@ -89,9 +91,21 @@ cmd_trust() {
   [ -f "${recipe}" ] || { echo "harness: ${recipe} does not exist" >&2; exit 1; }
   key="$(h_project_key)"; hash="$(h_filehash "${recipe}")"
   mkdir -p "${H_DIR}"; touch "$(h_trust_file)"
-  if grep -qF "${hash}	${key}" "$(h_trust_file)"; then echo "already trusted: ${recipe}"; exit 0; fi
+  if grep -qF "${hash}	${key}	" "$(h_trust_file)"; then echo "already trusted: ${recipe}"; exit 0; fi
   printf '%s\t%s\t%s\n' "${hash}" "${key}" "$(date '+%Y-%m-%dT%H:%M:%S')" >>"$(h_trust_file)"
   echo "trusted: ${recipe} (sha256 ${hash:0:12}…). The stop-gate will now run it before work is reported done."
+}
+cmd_untrust() {
+  local d="${1:-.}"; cd "${d}" 2>/dev/null || { echo "harness: no such directory: ${d}" >&2; exit 1; }; H_CWD="${PWD}"
+  local root key tf tmp n; root="$(h_root)"; key="$(h_project_key)"; tf="$(h_trust_file)"
+  [ -n "${key}" ] || { echo "harness: cannot resolve the project for ${PWD}" >&2; exit 1; }
+  n="$(K="${key}" awk -F'	' '$2 == ENVIRON["K"]' "${tf}" 2>/dev/null | wc -l | tr -d ' ')"
+  [ "${n:-0}" -gt 0 ] || { echo "not trusted: ${root} (nothing to do)"; exit 0; }
+  # Exact-key match, written to a temp file and moved into place (atomic on one filesystem).
+  tmp="${tf}.tmp.$$"
+  K="${key}" awk -F'	' '$2 != ENVIRON["K"]' "${tf}" >"${tmp}" && mv -f "${tmp}" "${tf}" \
+    || { rm -f "${tmp}"; echo "harness: could not rewrite ${tf}" >&2; exit 1; }
+  echo "untrusted: ${root} (removed ${n} trust record(s) from ${tf}). The stop-gate no longer runs or expects its verify recipe."
 }
 cmd_status() {
   local d="${1:-.}"; cd "${d}" 2>/dev/null || exit 1; H_CWD="${PWD}"
@@ -156,25 +170,29 @@ cmd_codex() {
   prompt="You are an independent reviewer from a different vendor than the author. READ-ONLY: do not modify any file. Report only findings you can substantiate with a file:line citation and, where possible, a command you ran and its output. 'No findings' is a valid result. Do not report style, naming, or hypothetical risks.
 
 ${prompt}"
-  local out; out="$(mktemp)"; local runner=""; command -v timeout >/dev/null 2>&1 && runner="timeout ${HARNESS_CODEX_TIMEOUT:-900}"
+  # The prompt goes on stdin (`-`), never argv: a large diff exceeds the per-argument
+  # limit (about 32 KB on Windows, 128 KiB on Linux). h_run_bounded falls back to a
+  # shell watchdog when neither timeout nor gtimeout exists (rc 124 on timeout).
+  local ctime="${HARNESS_CODEX_TIMEOUT:-900}"; case "${ctime}" in ''|*[!0-9]*|0) ctime=900 ;; esac   # seconds, digits only
+  local out; out="$(mktemp)"; printf '%s' "${prompt}" >"${out}.prompt"
   run_one() {
-    # shellcheck disable=SC2086
-    ${runner} codex exec --model "$1" --skip-git-repo-check -c "model_reasoning_effort=${effort}" -c 'sandbox_mode="read-only"' -o "${out}" "${prompt}" >"${out}.log" 2>&1 </dev/null
+    h_run_bounded "${ctime}" codex exec --model "$1" --skip-git-repo-check -c "model_reasoning_effort=${effort}" -c 'sandbox_mode="read-only"' -o "${out}" - <"${out}.prompt" >"${out}.log" 2>&1
   }
   if run_one "${model}"; then :; else
     local rc=$?
     if [ -n "${fallback}" ] && grep -Eqi 'not supported|newer version|unknown model|does not exist' "${out}.log"; then
       echo "NOTE: ${model} was rejected; retrying once on ${fallback}."; model="${fallback}"
-      run_one "${model}" || { echo "CODEX-FAILED (${model}): $(tail -n 3 "${out}.log" | tr '\n' ' ')"; rm -f "${out}" "${out}.log"; exit 6; }
+      run_one "${model}" || { echo "CODEX-FAILED (${model}): $(tail -n 3 "${out}.log" | tr '\n' ' ')"; rm -f "${out}" "${out}.log" "${out}.prompt"; exit 6; }
     else
       echo "CODEX-FAILED (${model}, exit ${rc}): $(tail -n 3 "${out}.log" | tr '\n' ' ')"
+      [ "${rc}" -eq 124 ] && echo "(timed out after ${ctime}s; raise HARNESS_CODEX_TIMEOUT for very large reviews)"
       echo "If this says the model is unsupported, run ${CLAUDE_DIR}/scripts/codex-refresh.sh and retry once. Do not conclude anything about the account from this error."
-      rm -f "${out}" "${out}.log"; exit 6
+      rm -f "${out}" "${out}.log" "${out}.prompt"; exit 6
     fi
   fi
   echo "=== Codex ${class} review (${model}, effort ${effort}, read-only) ==="
   if [ -s "${out}" ]; then cat "${out}"; else tail -n 60 "${out}.log"; fi
-  rm -f "${out}" "${out}.log"
+  rm -f "${out}" "${out}.log" "${out}.prompt"
 }
 
 cmd_undo() {
@@ -198,7 +216,7 @@ cmd_doctor() {
   [ -f "${CLAUDE_DIR}/harness/VERSION" ] && good "version $(cat "${CLAUDE_DIR}/harness/VERSION")" || bad "no installed version marker — run ./install.sh"
   command -v jq >/dev/null 2>&1 && good "jq present" || bad "jq missing — every hook is INERT without it (they fail open)"
   command -v git >/dev/null 2>&1 && good "git present" || bad "git missing — change detection and checkpoints are off"
-  { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; } && good "timeout present" || bad "no timeout command — a hanging verify recipe is only bounded by Claude Code's hook timeout"
+  { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; } && good "timeout present" || bad "no timeout/gtimeout command — verify recipes and Codex calls fall back to a shell watchdog (install coreutils for the standard one)"
   grep -qxF '<!-- model-harness:start -->' "${CLAUDE_DIR}/CLAUDE.md" 2>/dev/null && good "core rules block installed ($(awk '/model-harness:start/{f=1} f{n+=length($0)+1} /model-harness:end/{f=0} END{print n}' "${CLAUDE_DIR}/CLAUDE.md") bytes always loaded)" || bad "core rules block missing from CLAUDE.md"
   local a; for a in scout executor verifier architect oracle; do [ -f "${CLAUDE_DIR}/agents/${a}.md" ] || bad "agent ${a} not installed"; done
   local h s="${CLAUDE_DIR}/settings.json"
@@ -207,6 +225,8 @@ cmd_doctor() {
     elif [ -x "${CLAUDE_DIR}/hooks/${h}.sh" ]; then bad "hook ${h}: script present but NOT registered in settings.json"
     else echo "  off   hook ${h}: not installed (./install.sh --recommended enables it)"; fi
   done
+  if grep -q 'ops-guard.sh' "${s}" 2>/dev/null && command -v jq >/dev/null 2>&1 && ! jq -e '[.hooks.PreToolUse[]? | select(any(.hooks[]?; (.command // "") | contains("ops-guard.sh"))) | (.matcher // "")] | any(test("Write"))' "${s}" >/dev/null 2>&1; then
+    bad "hook ops-guard: registered without Write/Edit, so edits to the off switch and trust list are not checked (re-run ./install.sh)"; fi
   if h_off; then bad "kill switch is ON — all workflow hooks are disabled (harness on to re-enable)"; fi
   [ -e "${CLAUDE_DIR}/codex-routing.on" ] && { command -v codex >/dev/null 2>&1 && good "Codex routing ON, codex $(codex --version 2>/dev/null | head -1)" || bad "Codex routing ON but the codex CLI is not installed"; } || echo "  off   Codex cross-vendor review (touch ${CLAUDE_DIR}/codex-routing.on to enable)"
   echo "${ok} ok, ${warn} warning(s)"
@@ -216,6 +236,7 @@ cmd_doctor() {
 case "${1:-}" in
   detect)        shift; cmd_detect "$@" ;;
   trust-verify)  shift; cmd_trust "$@" ;;
+  untrust-verify) shift; cmd_untrust "$@" ;;
   status)        shift; cmd_status "$@" ;;
   stats)         shift; cmd_stats "$@" ;;
   lessons)       shift; cmd_lessons "$@" ;;
@@ -224,5 +245,5 @@ case "${1:-}" in
   doctor)        cmd_doctor ;;
   off)           mkdir -p "${H_DIR}"; touch "${H_DIR}/off"; echo "workflow hooks disabled (harness on to re-enable)" ;;
   on)            rm -f "${H_DIR}/off"; echo "workflow hooks enabled" ;;
-  *)             sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *)             sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

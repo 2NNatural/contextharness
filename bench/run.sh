@@ -34,6 +34,10 @@ done
 command -v claude >/dev/null 2>&1 || { echo "claude CLI not found" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq not found" >&2; exit 1; }
 [ -n "${OUT}" ] || OUT="${TMPDIR:-/tmp}/harness-bench"
+# h_run_bounded: timeout/gtimeout when present, else a shell watchdog (never unbounded).
+. "${REPO}/hooks/harness-lib.sh" || { echo "cannot load hooks/harness-lib.sh" >&2; exit 1; }
+# The graders need Python 3; resolve python3 or python once (check.sh falls back itself).
+PY="$(h_python)" || PY=""
 ARMDIR="${OUT}/${ARM}"; AHOME="${ARMDIR}/home"; CFG="${AHOME}/.claude"
 mkdir -p "${ARMDIR}/src" "${CFG}" "${ARMDIR}/runs"
 
@@ -63,7 +67,7 @@ run_one() {
   cp -R "${tdir}/fixture/." "${w}/"
   ( cd "${w}" && git init -q && git config user.email bench@example.invalid && git config user.name bench && git add -A && git commit -qm "fixture" ) >/dev/null 2>&1
   local start end; start="$(date +%s)"
-  ( cd "${w}" && HOME="${AHOME}" CLAUDE_CONFIG_DIR="${CFG}" timeout 1800 claude -p "$(cat "${tdir}/prompt.txt")" \
+  ( cd "${w}" && HOME="${AHOME}" CLAUDE_CONFIG_DIR="${CFG}" h_run_bounded 1800 claude -p "$(cat "${tdir}/prompt.txt")" \
       --model "${MODEL}" --output-format json --permission-mode acceptEdits \
       --allowedTools Bash Read Edit Write Glob Grep Agent Skill TodoWrite \
       --max-budget-usd "${BUDGET}" \
@@ -91,8 +95,8 @@ run_one() {
      > "${rdir}/row.json"
   echo "[${ARM}] ${task} #${trial}: pass=${pass} cost=\$$(jq -r '.cost_usd // "?"' "${rdir}/row.json") turns=$(jq -r '.turns // "?"' "${rdir}/row.json") wall=$((end-start))s"
 }
-export -f run_one
-export REPO ARM ARMDIR AHOME CFG MODEL BUDGET
+export -f run_one h_run_bounded h_descendants h_pidtable
+export REPO ARM ARMDIR AHOME CFG MODEL BUDGET PY
 [ -s "${ARMDIR}/system-prompt.txt" ] && export SYS_ARGS=1
 
 jobs_list="$(mktemp)"

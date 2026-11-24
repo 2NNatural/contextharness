@@ -66,8 +66,15 @@ is_scratch() {
   return 1
 }
 
+# Credential-like file names. Keep IDENTICAL to hooks/ops-guard.sh (T42f checks).
+SECRET_RE='(^|/)(\.env(\.[A-Za-z0-9_-]+)?|id_(rsa|dsa|ecdsa|ed25519)|[^/]*\.pem|[^/]*\.p12|\.netrc|\.npmrc|\.pypirc|credentials(\.json)?|secrets?\.(json|ya?ml|toml)|service-account[^/]*\.json)$'
+SAFE_ENV_RE='\.env\.(example|sample|template|dist|defaults)$'
+
 # True if deleting/moving this path loses nothing git cannot give back: it does
-# not exist yet, it is a clean tracked file, or it is git-ignored (build output).
+# not exist yet, it is a clean tracked file, or it is git-ignored (build output) —
+# except ignored files named like credentials (.env, keys), which git cannot restore
+# and nobody can regenerate. A wholly ignored directory is one `!! dir/` entry and
+# is not looked inside.
 # Untracked files and files with uncommitted changes are NOT restorable — that is
 # exactly the accident this guard exists for.
 is_restorable() {
@@ -78,6 +85,18 @@ is_restorable() {
   git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   case "$(cd "$d" 2>/dev/null && pwd -P)/" in */.git/*) return 1 ;; esac
   st="$(git -C "$d" status --porcelain --ignored -- "$p" 2>/dev/null)" || return 1
+  # git prints forward-slash paths on every platform; strip porcelain quoting.
+  printf '%s\n' "$st" | sed -n 's/^!! //p' | sed -e 's/^"//' -e 's/"$//' | while IFS= read -r ig; do
+    printf '%s' "$ig" | grep -Eq "$SECRET_RE" && ! printf '%s' "$ig" | grep -Eq "$SAFE_ENV_RE" && echo hit
+  done | grep -q hit && return 1
+  # A wholly ignored directory is one `!! dir/` entry: look inside it for credential-
+  # named files. Bounded: depth 3 below the target, first 5000 files, and dependency /
+  # VCS trees (node_modules, .venv, venv, .git) are pruned, so `rm -rf node_modules`
+  # and `rm -rf build` stay fast.
+  if [ -d "$p" ] && printf '%s\n' "$st" | grep -q '^!! .*/"\{0,1\}$'; then
+    find "$p" -maxdepth 3 \( -name node_modules -o -name .venv -o -name venv -o -name .git \) -prune -o -type f -print 2>/dev/null \
+      | head -n 5000 | grep -E "$SECRET_RE" | grep -Evq "$SAFE_ENV_RE" && return 1
+  fi
   [ -z "$(printf '%s\n' "$st" | grep -v '^!!' | grep -v '^$')" ]
 }
 
@@ -121,7 +140,15 @@ esac
 # Drop here-document bodies (file contents are data, not delete targets), then turn
 # shell operators and newlines into an explicit separator token, so one command's
 # arguments are never mistaken for the next command's targets.
-scan="$(printf '%s\n' "$cmd" \
+# `cd "$(git rev-parse --show-toplevel)"` at the start of the command is a literal cd
+# to the repository root (a common agent idiom); anywhere else, $(…) stays unknown.
+scmd="$cmd"
+top_re='^[[:space:]]*(cd|pushd)[[:space:]]+["'"'"']?[$][(]git rev-parse --show-toplevel[)]["'"'"']?([[:space:]]|$)'
+if [[ $cmd =~ $top_re ]]; then
+  top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
+  case "$top" in ''|*[[:space:]\&]*) ;; *) scmd="${cmd/\$(git rev-parse --show-toplevel)/$top}" ;; esac
+fi
+scan="$(printf '%s\n' "$scmd" \
         | awk 'hd != "" { if ($0 == hd) hd = ""; next }
                { print; if (match($0, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
                    t = substr($0, RSTART, RLENGTH); gsub(/<<-?[ \t]*|["\047]/, "", t); hd = t } }' \
@@ -131,16 +158,71 @@ scan="$(printf '%s\n' "$cmd" \
 # Only tokens AFTER the destructive verb, up to the next separator, are treated as
 # targets — this keeps `grep -rn "rm" src/`-style commands from flagging their own
 # leading words, and keeps a later `cat > file` out of an earlier delete's targets.
+#
+# `cd`/`pushd` to a literal directory is followed: relative targets are checked
+# against EVERY directory the command may be in at that point (a `(cd x && ...)`
+# subshell cannot be told apart once parentheses are separators). A `cd` whose
+# target cannot be read literally ($VAR, `cd -`, backticks) makes every later
+# relative target unprovable.
+NL='
+'
+expand_assigns() {  # expand_assigns <token> -> token with literal $S / ${S} assignments substituted
+  local t="$1" kv k v
+  for kv in $assigns; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    case "$t" in
+      "\$${k}")       t="${v}" ;;
+      "\$${k}/"*)     t="${v}/${t#*/}" ;;
+      "\${${k}}")     t="${v}" ;;
+      "\${${k}}/"*)   t="${v}/${t#*/}" ;;
+    esac
+  done
+  printf '%s' "$t"
+}
 armed=0; seen_git=0; candidates=0; seg_candidates=0; bare=0; outside=""; assigns=""
+cwds="$cwd"; cwd_unknown=0; segstart=1; pending_cd=0; cdpath=0
 for tok in $scan; do
   tok="${tok%\"}"; tok="${tok#\"}"; tok="${tok%\'}"; tok="${tok#\'}"
   [ -n "$tok" ] || continue
   if [ "$tok" = "@@SEP@@" ]; then
+    # A bare `cd` goes home.
+    [ "$pending_cd" -eq 1 ] && { cwds="${cwds}${NL}${HOME}"; pending_cd=0; }
     # A destructive verb with nothing inspectable after it (`xargs rm -f`) is unprovable.
     [ "$armed" -eq 1 ] && [ "$seg_candidates" -eq 0 ] && bare=1
-    armed=0; seen_git=0; continue
+    armed=0; seen_git=0; segstart=1; continue
+  fi
+  # A non-empty CDPATH (as a prefix, an assignment or an export) can send every later
+  # relative `cd` anywhere, so the taint is never reset within the command.
+  case "$tok" in CDPATH=|CDPATH=[\"\']|CDPATH=[\"\'][\"\']) ;; CDPATH=*) cdpath=1 ;; esac
+  if [ "$pending_cd" -eq 1 ]; then
+    case "$tok" in
+      -) cwd_unknown=1; pending_cd=0; continue ;;
+      -*) continue ;;
+    esac
+    tok="$(expand_assigns "$tok")"
+    case "$tok" in
+      *'$'*|*'`'*) cwd_unknown=1 ;;
+      '~')            cwds="${cwds}${NL}${HOME}" ;;
+      '~'/*)          cwds="${cwds}${NL}${HOME}/${tok#\~/}" ;;
+      /*|[A-Za-z]:*)  cwds="${cwds}${NL}${tok}" ;;
+      *)              if [ "$cdpath" -eq 1 ]; then cwd_unknown=1
+                      else last="${cwds##*"${NL}"}"; cwds="${cwds}${NL}${last%/}/${tok}"; fi ;;
+    esac
+    pending_cd=0; continue
   fi
   if [ "$armed" -eq 0 ]; then
+    if [ "$segstart" -eq 1 ]; then
+      # `cd` is still the command after VAR=value prefixes and after keywords that
+      # start a command (`{ cd x; …}`, `then cd x`, `do cd x`, `! cd x`).
+      case "$tok" in
+        cd|pushd) segstart=0; pending_cd=1; continue ;;
+        '{'|'!'|then|do|else|if|elif|while|until) continue ;;
+        [A-Za-z_]*=*)
+          case "$tok" in [A-Za-z_]*=/*) case "$tok" in *'$'*|*'`'*) ;; *) assigns="${assigns} ${tok}" ;; esac ;; esac
+          continue ;;
+      esac
+      segstart=0
+    fi
     case "$tok" in
       # Remember literal path assignments (S=/tmp/x) so `rm $S/file` can be resolved.
       [A-Za-z_]*=/*) case "$tok" in *'$'*|*'`'*) ;; *) assigns="${assigns} ${tok}" ;; esac ;;
@@ -156,15 +238,7 @@ for tok in $scan; do
     /dev/null|/dev/stdout|/dev/stderr|/dev/tty) continue ;;
   esac
   candidates=$((candidates+1)); seg_candidates=$((seg_candidates+1))
-  for kv in $assigns; do
-    k="${kv%%=*}"; v="${kv#*=}"
-    case "$tok" in
-      "\$${k}")       tok="${v}" ;;
-      "\$${k}/"*)     tok="${v}/${tok#*/}" ;;
-      "\${${k}}")     tok="${v}" ;;
-      "\${${k}}/"*)   tok="${v}/${tok#*/}" ;;
-    esac
-  done
+  tok="$(expand_assigns "$tok")"
   # Anything we cannot expand ($VAR, $(...), backticks) cannot be proved safe.
   case "$tok" in *'$'*|*'`'*) outside="${outside} ${tok}"; continue ;; esac
   tok="${tok%/\*}"; tok="${tok%\*}"
@@ -172,7 +246,16 @@ for tok in $scan; do
     '~')   abs="$HOME" ;;
     '~'/*) abs="${HOME}/${tok#\~/}" ;;
     /*)    abs="$tok" ;;
-    *)     abs="${cwd%/}/${tok}" ;;
+    *)
+      # Relative: must be safe from every directory the command may be in.
+      [ "$cwd_unknown" -eq 1 ] && { outside="${outside} ${tok}"; continue; }
+      while IFS= read -r c; do
+        abs="${c%/}/${tok}"
+        is_scratch "$abs" || is_restorable "$abs" || { outside="${outside} ${tok}"; break; }
+      done <<EOF
+${cwds}
+EOF
+      continue ;;
   esac
   is_scratch "$abs" || is_restorable "$abs" || outside="${outside} ${tok}"
 done

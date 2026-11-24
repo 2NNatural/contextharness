@@ -17,10 +17,15 @@
       cmd="$(h_get '.tool_input.command')"; [ -n "${cmd}" ] || exit 0
       ok=true; [ "${H_EVENT}" = "PostToolUseFailure" ] && ok=false
       ev=false; h_is_evidence "${cmd}" && ev=true
-      jq -cn --argjson t "${now}" --arg a "${H_AGENT}" --arg c "${cmd:0:300}" --argjson ok "${ok}" --argjson ev "${ev}" \
-        '{t:$t,k:"exec",ok:$ok,ev:$ev,a:$a,c:$c}' >>"${J}" 2>/dev/null
+      w=false; h_may_write "${cmd}" && w=true
+      # g: this command can create commits (commit/am/cherry-pick/revert/rebase/merge).
+      # Only then does the stop-gate count files changed by commits since session start
+      # (someone else's commit or a pull is not this session's change). Full command.
+      g=false; printf '%s\n' "${cmd}" | grep -Eq '(^|[^A-Za-z0-9_./-])git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+|[[:space:]]+--?[A-Za-z-]+(=[^[:space:]]*)?)*[[:space:]]+(commit|am|cherry-pick|revert|rebase|merge)([[:space:]]|$)' && g=true
+      jq -cn --argjson t "${now}" --arg a "${H_AGENT}" --arg c "${cmd:0:300}" --argjson ok "${ok}" --argjson ev "${ev}" --argjson w "${w}" --argjson g "${g}" \
+        '{t:$t,k:"exec",ok:$ok,ev:$ev,w:$w,g:$g,a:$a,c:$c}' >>"${J}" 2>/dev/null
       if [ "${ok}" = false ]; then
-        n="$(tail -n 60 "${J}" | jq -rs --arg a "${H_AGENT}" --arg c "${cmd:0:300}" '
+        n="$(tail -n 60 "${J}" | h_jlines | jq -rs --arg a "${H_AGENT}" --arg c "${cmd:0:300}" '
               reduce .[] as $e (0;
                 if $e.k=="edit" then 0
                 elif $e.k=="exec" and $e.a==$a and $e.c==$c and ($e.ok|not) then .+1

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # session-state.sh — SessionStart hook. Makes interruptions survivable without the
 # operator carrying context between sessions:
-#   startup        record a baseline + a git checkpoint (an undo point that does not
-#                  touch the working tree); if unfinished task state exists, say so
+#   startup        record a baseline, the starting HEAD and a git checkpoint (an undo
+#                  point that does not touch the working tree); if unfinished task state exists, say so
 #                  in ONE line (the content is not loaded unless it is needed).
 #   resume/compact re-inject the task state (STATE.md, capped) plus what the journal
 #                  knows for certain: files edited, last verification result.
@@ -18,6 +18,14 @@
 
   if [ ! -f "${H_STATE}/baseline" ]; then
     h_dirty_hash "${root}" >"${H_STATE}/baseline" 2>/dev/null
+    # Whether the verify recipe existed at session start: a trusted recipe that is
+    # missing now is "changed" only if it was there then (not on a branch without it).
+    if [ -f "${root}/.claude/harness/verify.sh" ]; then echo 1; else echo 0; fi >"${H_STATE}/recipe0"
+    # HEAD at session start ("-" = no commit yet): the stop-gate also counts files
+    # changed by commits made after it, so "edit, git commit, stop" is still gated.
+    if git -C "${root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      head="$(git -C "${root}" rev-parse -q --verify HEAD 2>/dev/null)"; printf '%s\n' "${head:--}" >"${H_STATE}/head"
+    fi
     if git -C "${root}" rev-parse HEAD >/dev/null 2>&1; then
       cp_sha="$(git -C "${root}" stash create 2>/dev/null)"
       [ -n "${cp_sha}" ] || cp_sha="$(git -C "${root}" rev-parse HEAD 2>/dev/null)"
@@ -45,7 +53,7 @@
       fi
       J="${H_STATE}/journal.jsonl"
       if [ -s "${J}" ]; then
-        files="$(jq -rs '[.[]|select(.k=="edit")|.f]|unique|.[-20:]|join(", ")' "${J}" 2>/dev/null)"
+        files="$(h_jlines <"${J}" | jq -rs '[.[]|select(.k=="edit")|.f]|unique|.[-20:]|join(", ")' 2>/dev/null)"
         [ -n "${files}" ] && echo "Files edited this session: ${files}"
       fi
       [ -s "${H_STATE}/verify.last" ] && echo "Last verification: $(head -c 300 "${H_STATE}/verify.last")"

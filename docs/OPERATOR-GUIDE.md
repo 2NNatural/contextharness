@@ -61,6 +61,8 @@ tests and an independent review).
 - Changing cloud infrastructure
 - Deleting data or running destructive database commands
 - Reading files that hold passwords or keys
+- Turning the harness's checks off, or changing what counts as "verified" (re-trusting or
+  un-trusting a verify recipe, editing its own session state)
 - Spending money
 - A choice that changes *what* gets built (asked once, with a recommendation)
 
@@ -87,7 +89,9 @@ only if you asked for that action.
 | It seems stuck repeating something | It is told to change approach after three identical failures. If it still loops, say "stop, tell me what is blocking you". |
 | The session was interrupted or the conversation got compacted | Just continue. Task state is restored automatically. |
 | A safety prompt keeps appearing for something you do want | Approve it. If it is truly routine for you, ask "why is this being flagged?" |
-| You want all the automatic checks off for a moment | `~/.claude/scripts/harness off` (and `harness on` to restore). |
+| You want all the automatic checks off for a moment | `~/.claude/scripts/harness off` (and `harness on` to restore). When Claude runs it for you, you will be asked to approve it. |
+| "The project verify recipe was modified or removed after it was trusted" | Someone changed `.claude/harness/verify.sh` (or deleted it). Until you decide, nothing counts as verified. Read the change (`git diff .claude/harness/verify.sh`); if it is right, run `~/.claude/scripts/harness trust-verify` in the project yourself. |
+| You removed the project's verify recipe on purpose | Run `~/.claude/scripts/harness untrust-verify` in the project (or `harness untrust-verify <dir>`). It deletes only that project's line from `~/.claude/harness/trust` and says what it removed. When Claude runs it for you, you will be asked to approve it. |
 | An update made things worse | `./install.sh --rollback` in the harness folder puts back the previous version. |
 | You want it gone | `./install.sh --uninstall`. Your own settings and notes are kept. |
 

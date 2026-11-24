@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 cd "$1" || exit 1
-python3 - <<'PY'
+PY="${PY:-$(command -v python3 >/dev/null 2>&1 && echo python3 || echo python)}"
+"$PY" - <<'PY'
 import report
 rows = report.load("sales.csv")
 top = report.top_products(rows)

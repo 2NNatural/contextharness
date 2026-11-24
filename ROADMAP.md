@@ -4,9 +4,13 @@
 
 ---
 
-### [NEXT] Run the Codex half that could not be run in the v2 build
-- On a machine with the Codex CLI logged in: `touch ~/.claude/codex-routing.on`, `~/.claude/scripts/harness doctor`, then one real `harness codex-review review <file>`. Confirm the model/effort/read-only flags are accepted by the installed CLI version.
-- Then have Codex challenge `docs/ARCHITECTURE.md` (the cross-vendor design review that v2 owes).
+### [DONE 2026-11-23] Run the Codex half that could not be run in the v2 build
+- `harness codex-review` ran live (`review` and `plan` tiers, codex-cli 0.162.1, Windows; the stdin path with a 73 KB prompt). Codex challenged the design (15 findings, plus 4 found while verifying them); 13 were confirmed in full and two (F6, F10) in part. A second review of the fixes (Claude architect + Codex `review` tier) found several only partly fixed, and a third review found regressions in that round; after the third, convergence-only round most are resolved and the rest are mitigated with the residue in docs/LIMITATIONS.md — per-finding status in docs/ARCHITECTURE.md › Codex cross-vendor review and the review tables after it.
+- 2026-11-24: `security --yes` and `judgment --yes` (gpt-6-astra) and the one-shot fallback retry also ran live, so every Codex tier has run at least once. Only the quality of Codex reviews remains unmeasured.
+
+### [NEXT] Run `tests/live-hooks.sh` on macOS, and re-run it on Windows and Linux
+- It aborts (exit 2) when the throwaway config cannot reach the model: export ANTHROPIC_API_KEY or set LIVE_COPY_CREDENTIALS=1. On Windows Git Bash it passed 7/7 on 2026-11-24 (haiku, `LIVE_COPY_CREDENTIALS=1`) with the second-round code and again with the final third-round code. macOS (bash 3.2) has not been run at all (also run `tests/run-tests.sh` there), and the Linux suite has not been re-run since the fixes.
+- Still never exercised live: an ops-guard ask on the Write/Edit tools, the `harness untrust-verify` ask, `bench/run.sh` under `h_run_bounded`. The operator's real `~/.claude` install is still v1.
 
 ### [NEXT] Make the benchmark discriminating
 - The six tasks are at or near ceiling for a strong orchestrator, so they cannot show a correctness difference between harness versions. Add tasks drawn from real defects the operator catches (target 20-50), each with a hidden check. See docs/BENCHMARK.md.

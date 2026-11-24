@@ -35,6 +35,10 @@ needs the operator's decision, never yours; say so.
 Never edit `verify.sh` to get a failing change through. Extending it with a new check is
 good; weakening it is hiding a defect.
 
+Make the recipe write its outputs (logs, reports, coverage, temp databases) only to
+git-ignored or temp paths (`mktemp -d`): a file it changes in the working tree counts as
+a code change, so the recipe would run again at every stop.
+
 ## Step 3 — Verify this change, matched to what it is
 | Change | Proof |
 |---|---|

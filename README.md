@@ -83,7 +83,7 @@ orchestrator — your strongest model; holds decisions and summaries, not file d
 | `journal` | after every edit and command | Per-session record; warns once when the same command fails three times in a row |
 | `stop-gate` | when the agent tries to finish | Runs the project's trusted `verify.sh`, or blocks once if code changed and nothing was run. Bounded; reports UNVERIFIED rather than looping |
 | `session-state` | session start, resume, after compaction | Git checkpoint at start; restores task state so nobody has to re-explain |
-| `ops-guard` | before shell commands and file reads | Asks before deploy / publish / infrastructure / force-push / push-to-main / destructive DB / credential reads |
+| `ops-guard` | before shell commands, file reads and file edits | Asks before deploy / publish / infrastructure / force-push / push-to-main / destructive DB / credential reads / switching the harness off or changing recipe trust |
 | `destructive-guard` | before shell commands | Blocks deletes and moves that git could not undo |
 | `context-meter` | each prompt | Injects a real `[context: ~N%]` reading at 70/80/90% |
 
@@ -171,7 +171,7 @@ remain available for manual use regardless of the toggle.
 ## Tests and benchmark
 
 ```sh
-bash tests/run-tests.sh        # 133 deterministic tests, sandboxed, no model calls
+bash tests/run-tests.sh        # 188 deterministic tests, sandboxed, no model calls
 ```
 
 ```sh

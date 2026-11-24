@@ -12,7 +12,7 @@ was **implemented**, **adapted**, **deferred** or **rejected** in v2 — with th
 | "How to be like @poteto" (thoughtfulbits.ai) | full page | A third-party digest of her posts, talks and the plugin. |
 | xAI "Grok Bot for Engineering" and "Grok Bot 101" | full pages | Vendor guides. |
 | Claude Code docs (hooks, skills, subagents, memory, headless, worktrees, permissions) | official docs, plus hook payloads captured live on Claude Code 2.1.331 | Payload fields used by the hooks were observed, not assumed. |
-| Codex CLI | `openai/codex` source on GitHub (exec flags, config schema, hooks) and the `codex-plugin-cc` README | The official OpenAI docs site was not reachable from the build environment; Codex was **not installed or authenticated** there, so nothing Codex-related was exercised live. |
+| Codex CLI | `openai/codex` source on GitHub (exec flags, config schema, hooks) and the `codex-plugin-cc` README | The official OpenAI docs site was not reachable from the build environment; Codex was **not installed or authenticated** there, so nothing Codex-related was exercised live. Later (2026-11-23) the `review` and `plan` tiers ran live on Windows with codex-cli 0.162.1; see ARCHITECTURE.md › Codex cross-vendor review. |
 | Anthropic engineering posts (context engineering, multi-agent research system, harness design for long-running apps, agent evals) | full pages | |
 | Research papers (AGENTS.md effectiveness, MAST multi-agent failure taxonomy, cross-model review) | search summaries only | arXiv was not reachable; treated as weak evidence and labelled so. |
 
@@ -50,7 +50,7 @@ The pattern: v1's routing was real; nearly everything about correctness was a re
 |---|---|---|
 | v1 routing table, effort defaults, escalation ladder | **Preserved** | Demonstrated strength. |
 | Escalate on observed failure | **Implemented** — "fails the same task twice → escalate the model once" (core) plus loop detector | |
-| Cross-vendor review Claude ↔ Codex | **Preserved and hardened** — `harness codex-review` wraps `codex exec` in a read-only sandbox with tier/effort from one config file, confirm gate for the priciest tier, one fallback | Replaces an unverified path with a tested one (stub-tested; **not live-tested** — no Codex here). |
+| Cross-vendor review Claude ↔ Codex | **Preserved and hardened** — `harness codex-review` wraps `codex exec` in a read-only sandbox with tier/effort from one config file, confirm gate for the priciest tier, one fallback | Replaces an unverified path with a tested one (stub-tested; on Windows, codex-cli 0.162.1, `review`/`plan` ran live on 2026-11-23 and `security --yes`/`judgment --yes` plus the fallback retry on 2026-11-24; review quality not measured). |
 | Avoid redundant review | **Implemented** — no reviewer in Light mode; cross-vendor only for genuinely risky work | One preliminary study found Codex reviewing Claude's drafts made results *worse*; a second model is not automatically a gain, so findings must reproduce before they count. |
 | Routing adjusted from measured performance | **Adapted** — `harness stats` reports real per-model token use from transcripts; `routing-refresh` may cite it | Fully automatic re-routing was **rejected**: it is uncontrolled self-modification on thin data. |
 

@@ -106,7 +106,7 @@ requests, and real project recipes. It has not been shown yet.
 | Measure | v1 | v2 | How measured |
 |---|---|---|---|
 | Always-loaded instruction block | 14,440 bytes | 7,441 bytes (−48%) | `wc -c routing-rules.md` at each commit; budget enforced by test T42a |
-| Deterministic tests | 63 | 133 | `bash tests/run-tests.sh` |
+| Deterministic tests | 63 | 133 (at the benchmarked commit; 180 after the Codex-review fixes) | `bash tests/run-tests.sh` |
 | Agent held when it tries to finish after an unverified edit | no mechanism | blocked, then verified | `tests/live-hooks.sh` on the real CLI |
 | Failing trusted project recipe at finish | no mechanism | turn held open; released as UNVERIFIED after the bound | `tests/live-hooks.sh` |
 | Unattended deploy script | runs | does not run | `tests/live-hooks.sh` |
@@ -128,7 +128,7 @@ use.
 | Human interventions required | Not measurable in headless runs (there is no human). Proxy: final reports that ended with a question to the operator — 1 of 36 v2 runs, 1 of 24 v1 runs, 0 of 24 with no harness; both had already passed the hidden check |
 | Recovery from failed sessions | Not benchmarked. Mechanism verified once in `tests/live-hooks.sh` (resume) |
 | Context efficiency | Static measure only (always-loaded bytes); per-run token totals reported above |
-| Review effectiveness | Not measured. No task in the suite triggers a full review, and Codex was unavailable |
+| Review effectiveness | Not measured. No task in the suite triggers a full review (Codex is now available and every tier has run live, but no benchmark task exercises it) |
 | Verification quality | Not measured directly. The `weak-tests` task checks that a regression test was added; all arms passed |
 
 ## Making it useful

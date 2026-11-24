@@ -21,7 +21,7 @@
 | Interface inventory template | ✅ Done | `templates/INTERFACES.md`, installed only via standalone `--init-inventory` |
 | v2 workflow hooks (journal, stop-gate, session-state, ops-guard) | ✅ Done, unit-tested + live-tested | opt-in via `--recommended` / `--with-workflow-hooks` |
 | Skills plan / verify / review / learn / parallel, `verifier` agent, `harness` CLI | ✅ Done | skills are prose (not unit-testable); CLI is tested |
-| Codex review wrapper (`harness codex-review`) | ⚠️ Done, stub-tested only | never run against a real Codex CLI |
+| Codex review wrapper (`harness codex-review`) | ✅ Done, live-tested | all four tiers ran live on Windows (codex-cli 0.162.1): `review`/`plan` 2026-11-23 (stdin path, 73 KB), `security`/`judgment --yes` (gpt-6-astra) and the fallback retry 2026-11-24; review quality not measured |
 | Benchmark suite (`bench/`) | ✅ Done | 6 tasks; near ceiling for strong models — needs harder tasks |
 | Destructive guard | ✅ Done, git-aware in v2; v1 note: blocking unverified live | opt-in `--with-destructive-guard`; PreToolUse/Bash; fail-open; not yet confirmed to actually block inside a real `claude --debug` session |
 
@@ -39,17 +39,17 @@ benchmark. Full detail: [CHANGELOG.md](CHANGELOG.md), [docs/](docs/).
 - Agent: `verifier`. CLI: `scripts/harness`. Config: `config/codex-tiers`. Portable core: `codex/AGENTS.block.md`.
 - Installer: `--recommended`, `--rollback`, `--uninstall`, `--with-codex-agents`, `CLAUDE_CONFIG_DIR`, versioned backups.
 - Core block 14,440 → 7,441 bytes with a size-budget test.
-- Tests 63 → 133; `tests/live-hooks.sh`; `bench/`.
+- Tests 63 → 133; `tests/live-hooks.sh`; `bench/`. (After three rounds of Codex-review fixes: 188.)
 
 ### Verified this session
-- `bash tests/run-tests.sh`: 133 passed, 0 failed, 1 skipped (platform).
+- `bash tests/run-tests.sh`: 133 passed, 0 failed, 1 skipped (platform). After three rounds of Codex-review fixes, on Windows 11 / Git Bash: 186 passed, 0 failed, 2 skipped (T10, T14 platform skips).
 - `bash tests/live-hooks.sh` on Claude Code 2.1.331: 7/7 (real block on unverified stop, failing trusted recipe holds the turn, unattended deploy script did not run, state restored on resume).
 - Benchmark: see [docs/BENCHMARK.md](docs/BENCHMARK.md) for the measured numbers and their limits.
 
 ### NOT verified
-- Anything Codex: no Codex CLI/auth in the build environment. `harness codex-review` is stub-tested only.
+- Anything Codex: no Codex CLI/auth in the build environment. `harness codex-review` was stub-tested only. (Since then, on Windows: all four tiers and the fallback retry ran live, 2026-11-23/24.)
 - The operator's own machine: the harness was not installed where this work ran; v1 behaviour was observed in sandboxes.
-- macOS and Windows for the new hooks.
+- macOS and Windows for the new hooks. (Since then: `tests/live-hooks.sh` passed 7/7 on Windows Git Bash on 2026-11-24, with the second-round code and again with the final third-round code; macOS is still not run.)
 
 ### Notes
 - CONTEXT.md §1 asks for a check-in after each chunk of work; this session's brief explicitly asked for end-to-end execution without stopping, so that rule was not applied here.
